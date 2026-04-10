@@ -11,6 +11,9 @@ Du an giai bai toan Travelling Salesman Problem (TSP) bang Genetic Algorithm (GA
 - Crossover: Order Crossover OX1
 - Mutation: Inversion Mutation
 - Elitism: giu lai top ELITE_SIZE ca the tot nhat moi the he
+- Ho tro 2 backend:
+  - custom: GA tu cai dat tay
+  - simpleai: su dung thu vien simpleAI (genetic)
 - Visualization:
   - Animation qua trinh toi uu bang FuncAnimation
   - Bieu do route cuoi cung
@@ -25,9 +28,12 @@ AI_rp/
 |-- tsp_ga_app/
 |   |-- __init__.py
 |   |-- config.py
+|   |-- main.py
 |   |-- problem.py
 |   |-- operators.py
 |   |-- solver.py
+|   |-- simpleai_solver.py
+|   |-- visualize.py
 |   |-- visualization.py
 ```
 
@@ -36,15 +42,21 @@ Y nghia tung file:
 - tsp_ga.py:
   - Entry point gon, chi goi ham main de chay chuong trinh.
 - tsp_ga_app/config.py:
-  - Tat ca tham so mac dinh cua GA va visualization.
+  - Tat ca tham so mac dinh cua GA, visualization, va lua chon backend.
+- tsp_ga_app/main.py:
+  - Luong chay chinh, chon backend solver theo cau hinh.
 - tsp_ga_app/problem.py:
   - Ham tao city, tinh distance matrix, tinh tong quang duong route, va fitness.
 - tsp_ga_app/operators.py:
   - Cac toan tu tien hoa: tao quan the, tournament selection, OX1 crossover, inversion mutation, evolve population.
 - tsp_ga_app/solver.py:
   - Vong lap GA chinh, theo doi best theo thoi gian, tra ve du lieu cho animation/convergence.
+- tsp_ga_app/simpleai_solver.py:
+  - Solver dung simpleAI genetic, co fallback manual (elitism/diversity) khi can, va giu API tuong thich voi solver custom.
+- tsp_ga_app/visualize.py:
+  - Module visualization chinh de import plot_route, plot_convergence, animate_evolution.
 - tsp_ga_app/visualization.py:
-  - Ve route, ve convergence, animate evolution.
+  - Module implementation visualization goc (duoc tai su dung boi visualize.py).
 
 ## 3. Mapping cac ham bat buoc
 
@@ -65,6 +77,21 @@ Tat ca ham yeu cau van co day du, nhung duoc tach theo module de de bao tri:
 - animate_evolution: visualization.py
 
 Ham main nam o tsp_ga_app/main.py va duoc goi qua tsp_ga.py.
+
+## 3.1 Lua chon backend solver
+
+Trong tsp_ga_app/config.py:
+
+- SOLVER_BACKEND = "simpleai" -> dung thu vien simpleAI
+- SOLVER_BACKEND = "custom" -> dung solver GA tu cai dat
+
+Khi dung backend simpleai, he thong ap dung them:
+
+- Multi-restart de tranh ket qua kem do random ban dau
+- 2-opt refinement sau GA de cai thien route cuoi
+- Fitness scaling theo mu (power) de tang ap luc chon loc
+
+Khi chay, chuong trinh se in backend dang dung trong output.
 
 ## 4. Luong xu ly tong the
 
@@ -181,6 +208,13 @@ Loi ich:
 
 Neu backend khong interactive (vi du Agg), animation hien thi se duoc bo qua de tranh canh bao; phan tinh toan van chay binh thuong.
 
+Voi GUI PyQt5, animation live duoc chay theo co che buffer:
+
+- Solver va animation chay dong thoi (producer-consumer).
+- Co the dat toc do playback (ms/frame) de xem cham hon qua trinh toi uu.
+- Frame moi duoc cache trong buffer de animation phat lai dan.
+- Neu buffer tam thoi het frame (solver chua gui kip), animation se tam dung/freeze va tiep tuc khi co frame moi.
+
 ## 7. Cach chay
 
 Tu thu muc AI_rp:
@@ -189,10 +223,22 @@ Tu thu muc AI_rp:
 python tsp_ga.py
 ```
 
+Mo giao dien PyQt5 de quan sat live va chinh tham so:
+
+```bash
+python tsp_ga.py --gui
+```
+
+Hoac:
+
+```bash
+python tsp_ga_gui.py
+```
+
 Neu can cai thu vien:
 
 ```bash
-pip install numpy matplotlib
+pip install numpy matplotlib simpleai pyqt5
 ```
 
 ## 8. Chinh tham so
@@ -201,14 +247,23 @@ Tat ca tham so nam trong tsp_ga_app/config.py:
 
 - POP_SIZE = 100
 - GENERATIONS = 200
-- MUTATION_RATE = 0.1
+- MUTATION_RATE = 0.2
 - CROSSOVER_RATE = 0.8
 - ELITE_SIZE = 2
 - NUM_CITIES = 20
 - TOURNAMENT_SIZE = 3
 - ANIMATION_INTERVAL_MS = 80
-- RANDOM_SEED = 42
-- SAVE_GIF = False
+- SOLVER_BACKEND = "custom"
+- SIMPLEAI_RESTARTS = 8
+- SIMPLEAI_ENABLE_2OPT = True
+- SIMPLEAI_2OPT_MAX_PASSES = 25
+- SIMPLEAI_FITNESS_POWER = 2.0
+- SIMPLEAI_USE_NATIVE_GENETIC = True
+- SIMPLEAI_ENABLE_ELITISM = False
+- SIMPLEAI_DIVERSITY_RATE = 0.05
+- SIMPLEAI_EPSILON = 1e-3
+- RANDOM_SEED = 34230
+- SAVE_GIF = True
 - GIF_PATH = "tsp_ga_evolution.gif"
 
 Goi y:
@@ -216,6 +271,8 @@ Goi y:
 - Tang POP_SIZE hoac GENERATIONS -> nghiem thuong tot hon, nhung cham hon.
 - Tang MUTATION_RATE qua cao co the lam giam do on dinh.
 - ELITE_SIZE qua lon co the lam quan the de bi hoi tu som.
+- Neu backend simpleai con chua dat chat luong mong muon, tang SIMPLEAI_RESTARTS truoc.
+- Neu can chat luong cao hon nua, tang SIMPLEAI_2OPT_MAX_PASSES (doi lai se cham hon).
 
 ## 9. Bao dam tinh dung
 

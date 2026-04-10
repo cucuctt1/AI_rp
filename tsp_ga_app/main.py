@@ -16,11 +16,13 @@ from .config import (
     POP_SIZE,
     RANDOM_SEED,
     SAVE_GIF,
+    SOLVER_BACKEND,
     TOURNAMENT_SIZE,
 )
 from .problem import compute_distance_matrix, generate_cities
-from .solver import genetic_algorithm
-from .visualization import animate_evolution, plot_convergence, plot_route
+from .simpleai_solver import genetic_algorithm_simpleai
+from .solver import genetic_algorithm as genetic_algorithm_custom
+from .visualize import animate_evolution, plot_convergence, plot_route
 
 
 def main() -> None:
@@ -31,13 +33,21 @@ def main() -> None:
     cities = generate_cities(NUM_CITIES)
     dist_matrix = compute_distance_matrix(cities)
 
+    backend = SOLVER_BACKEND.strip().lower()
+    if backend == "simpleai":
+        ga_solver = genetic_algorithm_simpleai
+    elif backend == "custom":
+        ga_solver = genetic_algorithm_custom
+    else:
+        raise ValueError("SOLVER_BACKEND must be either 'custom' or 'simpleai'.")
+
     (
         best_route,
         best_distance,
         best_distance_history,
         best_route_history,
         initial_best_distance,
-    ) = genetic_algorithm(
+    ) = ga_solver(
         cities=cities,
         dist_matrix=dist_matrix,
         pop_size=POP_SIZE,
@@ -53,6 +63,7 @@ def main() -> None:
 
     print("Best route:", best_route)
     print(f"Best distance: {best_distance:.4f}")
+    print(f"Solver backend: {backend}")
     print(f"Initial best distance: {initial_best_distance:.4f}")
     print(f"Distance improvement: {improvement:.4f} ({improvement_pct:.2f}%)")
 

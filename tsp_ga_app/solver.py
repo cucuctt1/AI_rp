@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -14,6 +14,38 @@ from .operators import create_population, evolve_population
 from .problem import route_distance, set_distance_matrix
 
 
+ProgressCallback = Optional[Callable[[Dict[str, object]], None]]
+
+
+def _emit_progress(
+    progress_callback: ProgressCallback,
+    generation: int,
+    total_generations: int,
+    best_route: List[int],
+    best_distance: float,
+) -> None:
+    if progress_callback is None:
+        return
+
+    payload: Dict[str, object] = {
+        "backend": "custom",
+        "phase": "ga",
+        "generation": generation,
+        "total_generations": total_generations,
+        "restart_index": 1,
+        "restart_count": 1,
+        "best_route": list(best_route),
+        "best_distance": float(best_distance),
+    }
+    try:
+        progress_callback(payload)
+    except RuntimeError:
+        raise
+    except Exception:
+        # Progress notifications must not interrupt optimization.
+        return
+
+
 def genetic_algorithm(
     cities: np.ndarray,
     dist_matrix: np.ndarray,
@@ -23,6 +55,7 @@ def genetic_algorithm(
     crossover_rate: float = CROSSOVER_RATE,
     elite_size: int = ELITE_SIZE,
     tournament_size: int = TOURNAMENT_SIZE,
+    progress_callback: ProgressCallback = None,
 ) -> Tuple[List[int], float, List[float], List[List[int]], float]:
     """Run GA and return best solution, convergence history, and frame routes."""
     set_distance_matrix(dist_matrix)
@@ -37,7 +70,7 @@ def genetic_algorithm(
     initial_distances = [route_distance(route, dist_matrix) for route in population]
     initial_best_distance = float(min(initial_distances))
 
-    for _ in range(generations):
+    for generation_idx in range(generations):
         distances = [route_distance(route, dist_matrix) for route in population]
         generation_best_idx = int(np.argmin(distances))
         generation_best_route = list(population[generation_best_idx])
@@ -52,6 +85,14 @@ def genetic_algorithm(
 
         best_distance_history.append(best_distance)
         best_route_history.append(list(best_route))
+
+        _emit_progress(
+            progress_callback=progress_callback,
+            generation=generation_idx + 1,
+            total_generations=generations,
+            best_route=best_route,
+            best_distance=best_distance,
+        )
 
         population = evolve_population(
             population=population,

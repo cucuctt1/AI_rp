@@ -7,8 +7,9 @@ from .operators import (
     tournament_selection,
 )
 from .problem import compute_distance_matrix, fitness, generate_cities, route_distance
+from .simpleai_solver import genetic_algorithm_simpleai
 from .solver import genetic_algorithm
-from .visualization import animate_evolution, plot_convergence, plot_route
+from .visualize import animate_evolution, plot_convergence, plot_route
 
 __all__ = [
     "main",
@@ -22,6 +23,7 @@ __all__ = [
     "mutation_inversion",
     "evolve_population",
     "genetic_algorithm",
+    "genetic_algorithm_simpleai",
     "plot_route",
     "plot_convergence",
     "animate_evolution",
