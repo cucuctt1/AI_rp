@@ -14,6 +14,7 @@ Du an giai bai toan Travelling Salesman Problem (TSP) bang Genetic Algorithm (GA
 - Ho tro 2 backend:
   - custom: GA tu cai dat tay
   - simpleai: su dung thu vien simpleAI (genetic)
+- Co them BAT-inspired solver de so sanh trong GUI (comparison mode)
 - Visualization:
   - Animation qua trinh toi uu bang FuncAnimation
   - Bieu do route cuoi cung
@@ -33,6 +34,7 @@ AI_rp/
 |   |-- operators.py
 |   |-- solver.py
 |   |-- simpleai_solver.py
+|   |-- bat_solver.py
 |   |-- visualize.py
 |   |-- visualization.py
 ```
@@ -53,6 +55,8 @@ Y nghia tung file:
   - Vong lap GA chinh, theo doi best theo thoi gian, tra ve du lieu cho animation/convergence.
 - tsp_ga_app/simpleai_solver.py:
   - Solver dung simpleAI genetic, co fallback manual (elitism/diversity) khi can, va giu API tuong thich voi solver custom.
+- tsp_ga_app/bat_solver.py:
+  - Solver BAT-inspired cho TSP, dung de compare voi backend dang chon trong GUI.
 - tsp_ga_app/visualize.py:
   - Module visualization chinh de import plot_route, plot_convergence, animate_evolution.
 - tsp_ga_app/visualization.py:
@@ -214,6 +218,7 @@ Voi GUI PyQt5, animation live duoc chay theo co che buffer:
 - Co the dat toc do playback (ms/frame) de xem cham hon qua trinh toi uu.
 - Frame moi duoc cache trong buffer de animation phat lai dan.
 - Neu buffer tam thoi het frame (solver chua gui kip), animation se tam dung/freeze va tiep tuc khi co frame moi.
+- Co tuy chon Enable BAT comparison: GUI se chay them BAT-inspired solver, hien route thu 2 va ve de chong (overlay) tren cung bieu do convergence.
 
 ## 7. Cach chay
 
@@ -254,6 +259,7 @@ Tat ca tham so nam trong tsp_ga_app/config.py:
 - TOURNAMENT_SIZE = 3
 - ANIMATION_INTERVAL_MS = 80
 - SOLVER_BACKEND = "custom"
+- ENABLE_BAT_COMPARISON = False
 - SIMPLEAI_RESTARTS = 8
 - SIMPLEAI_ENABLE_2OPT = True
 - SIMPLEAI_2OPT_MAX_PASSES = 25

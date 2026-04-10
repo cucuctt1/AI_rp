@@ -14,6 +14,7 @@ ANIMATION_INTERVAL_MS = 80
 
 # Solver backend: "custom" (from-scratch GA) or "simpleai".
 SOLVER_BACKEND = "custom"
+ENABLE_BAT_COMPARISON = False
 
 # simpleAI quality tuning.
 SIMPLEAI_RESTARTS = 8

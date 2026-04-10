@@ -1,4 +1,5 @@
 from .main import main
+from .bat_solver import bat_algorithm_tsp
 from .operators import (
     create_population,
     crossover_OX1,
@@ -13,6 +14,7 @@ from .visualize import animate_evolution, plot_convergence, plot_route
 
 __all__ = [
     "main",
+    "bat_algorithm_tsp",
     "generate_cities",
     "compute_distance_matrix",
     "route_distance",
