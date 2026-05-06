@@ -86,13 +86,36 @@ def genetic_algorithm(
         best_distance_history.append(best_distance)
         best_route_history.append(list(best_route))
 
-        _emit_progress(
-            progress_callback=progress_callback,
-            generation=generation_idx + 1,
-            total_generations=generations,
-            best_route=best_route,
-            best_distance=best_distance,
-        )
+        # Compute additional statistics for live visualization
+        try:
+            fitnesses = [1.0 / d if d > 0 else 0.0 for d in distances]
+            avg_fitness = float(np.mean(fitnesses)) if fitnesses else 0.0
+            std_fitness = float(np.std(fitnesses)) if fitnesses else 0.0
+            diversity = int(len(set(tuple(ind) for ind in population)))
+        except Exception:
+            avg_fitness = 0.0
+            std_fitness = 0.0
+            diversity = 0
+
+        if progress_callback is not None:
+            payload = {
+                "backend": "custom",
+                "phase": "ga",
+                "generation": generation_idx + 1,
+                "total_generations": generations,
+                "restart_index": 1,
+                "restart_count": 1,
+                "best_route": list(best_route),
+                "best_distance": float(best_distance),
+                "avg_fitness": avg_fitness,
+                "std_fitness": std_fitness,
+                "diversity": diversity,
+            }
+            try:
+                progress_callback(payload)
+            except Exception:
+                # Do not let progress reporting interrupt GA
+                pass
 
         population = evolve_population(
             population=population,

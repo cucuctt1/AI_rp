@@ -90,6 +90,10 @@ def _emit_progress(
         "restart_count": int(restart_count),
         "best_route": list(best_route),
         "best_distance": float(best_distance),
+        # Provide placeholders for extended metrics to keep payload schema stable
+        "avg_fitness": None,
+        "std_fitness": None,
+        "diversity": None,
     }
     try:
         progress_callback(payload)

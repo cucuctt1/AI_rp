@@ -1,7 +1,8 @@
 from typing import Optional, Sequence, Tuple
 
-import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from matplotlib.animation import FuncAnimation
 
 from .config import ANIMATION_INTERVAL_MS, GIF_PATH, SAVE_GIF
@@ -12,9 +13,10 @@ def plot_route(
     route: Sequence[int],
     distance: Optional[float] = None,
     title: str = "Final TSP Route",
-) -> Tuple[plt.Figure, plt.Axes]:
+) -> Tuple[Figure, Axes]:
     """Plot a route with city markers and city index labels."""
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig = Figure(figsize=(8, 6))
+    ax = fig.add_subplot(111)
 
     ax.scatter(cities[:, 0], cities[:, 1], c="tab:red", s=50, zorder=3)
     for city_idx, (x_coord, y_coord) in enumerate(cities):
@@ -45,9 +47,10 @@ def plot_route(
     return fig, ax
 
 
-def plot_convergence(best_distance_history: Sequence[float]) -> Tuple[plt.Figure, plt.Axes]:
+def plot_convergence(best_distance_history: Sequence[float]) -> Tuple[Figure, Axes]:
     """Plot convergence curve: generation vs best distance."""
-    fig, ax = plt.subplots(figsize=(8, 4.5))
+    fig = Figure(figsize=(8, 4.5))
+    ax = fig.add_subplot(111)
 
     generations = np.arange(1, len(best_distance_history) + 1)
     ax.plot(generations, best_distance_history, color="tab:green", linewidth=2)
@@ -68,12 +71,13 @@ def animate_evolution(
     repeat: bool = False,
     save_gif: bool = SAVE_GIF,
     gif_path: str = GIF_PATH,
-) -> Tuple[plt.Figure, FuncAnimation]:
+) -> Tuple[Figure, FuncAnimation]:
     """Animate route improvement across generations."""
     if not route_history:
         raise ValueError("Route history must not be empty for animation.")
 
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig = Figure(figsize=(8, 6))
+    ax = fig.add_subplot(111)
     ax.scatter(cities[:, 0], cities[:, 1], c="tab:red", s=50, zorder=3)
     for city_idx, (x_coord, y_coord) in enumerate(cities):
         ax.text(x_coord + 0.8, y_coord + 0.8, str(city_idx), fontsize=8)

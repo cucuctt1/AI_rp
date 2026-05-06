@@ -1,0 +1,7 @@
+{
+  "name": "sample_tsp_20",
+  "description": "Example TSP city dataset for the GUI JSON loader.",
+  "cities": [
+    { "id": 0, "x": 12.0, "y": 18.0 }
+  ]
+}

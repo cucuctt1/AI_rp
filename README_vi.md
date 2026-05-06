@@ -258,6 +258,40 @@ Tat ca tham so nam trong tsp_ga_app/config.py:
 - NUM_CITIES = 20
 - TOURNAMENT_SIZE = 3
 - ANIMATION_INTERVAL_MS = 80
+
+## 9. Unified Run Instructions
+
+Use the canonical `tsp_ga_app` GUI or CLI wrappers to run experiments and batch searches. Outputs are written to the `outputs/` folder and include `config.json`, `metrics.csv`, `best_solution.json`, `summary.json`, and `experiment_log.txt`.
+
+Run interactive GUI:
+
+```bash
+python tsp_ga.py --gui
+```
+
+Run a single experiment via CLI (writes full artifacts):
+
+```bash
+python run_single.py
+```
+
+Run a batch/grid search (writes a batch parent folder with per-trial subfolders and `raw_runs.csv` inside the batch folder):
+
+```bash
+python run_batch.py
+```
+
+Generated visual artifacts per run:
+
+- `evolution.gif`: animated GIF of best-route evolution (if city coordinates provided)
+- `final_route.png`: final best route plot
+- `convergence.png`: convergence curve (best distance vs generation)
+
+Batch-level artifacts:
+
+- `batch_best_distances.png`: bar chart of best distances per run (saved inside batch parent folder)
+
+
 - SOLVER_BACKEND = "custom"
 - ENABLE_BAT_COMPARISON = False
 - SIMPLEAI_RESTARTS = 8

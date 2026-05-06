@@ -1,6 +1,10 @@
 from collections import deque
+import json
+import os
 import random
+import shutil
 import sys
+import time
 import traceback
 from typing import Any, Deque, Dict, List, Optional
 
@@ -215,6 +219,65 @@ class SolverWorker(QtCore.QObject):
             setattr(simpleai_module, key, value)
 
 
+class BatchWorker(QtCore.QObject):
+    trial = QtCore.pyqtSignal(dict)
+    finished = QtCore.pyqtSignal(dict)
+    failed = QtCore.pyqtSignal(str)
+
+    def __init__(
+        self,
+        base_config: Dict[str, Any],
+        param_grid: Dict[str, List[Any]],
+        cities: np.ndarray,
+        dist_matrix: np.ndarray,
+        base_experiment_name: str,
+        num_trials: int,
+        seed_offset: int,
+    ) -> None:
+        super().__init__()
+        self.base_config = base_config
+        self.param_grid = param_grid
+        self.cities = cities
+        self.dist_matrix = dist_matrix
+        self.base_experiment_name = base_experiment_name
+        self.num_trials = num_trials
+        self.seed_offset = seed_offset
+        self._stop_requested = False
+
+    @QtCore.pyqtSlot()
+    def run(self) -> None:
+        try:
+            from experiments.batch_runner import run_grid_search
+
+            def per_trial_callback(payload: Dict[str, Any]) -> None:
+                if self._stop_requested:
+                    raise RuntimeError(STOP_EXCEPTION_TEXT)
+                self.trial.emit(dict(payload))
+
+            run_grid_search(
+                base_config=self.base_config,
+                param_grid=self.param_grid,
+                dist_matrix=self.dist_matrix,
+                cities=self.cities,
+                base_experiment_name=self.base_experiment_name,
+                num_trials=self.num_trials,
+                seed_offset=self.seed_offset,
+                per_trial_callback=per_trial_callback,
+            )
+            self.finished.emit({"event": "complete"})
+        except RuntimeError as err:
+            if str(err) == STOP_EXCEPTION_TEXT:
+                self.failed.emit(STOP_EXCEPTION_TEXT)
+            else:
+                self.failed.emit(traceback.format_exc())
+        except Exception:
+            self.failed.emit(traceback.format_exc())
+
+    @QtCore.pyqtSlot()
+    def request_stop(self) -> None:
+        self._stop_requested = True
+
+
 class TSPControlPanel(QtWidgets.QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -223,6 +286,8 @@ class TSPControlPanel(QtWidgets.QMainWindow):
 
         self._thread: Optional[QtCore.QThread] = None
         self._worker: Optional[SolverWorker] = None
+        self._batch_thread: Optional[QtCore.QThread] = None
+        self._batch_worker: Optional[BatchWorker] = None
 
         self.current_cities: Optional[np.ndarray] = None
         self.primary_steps: List[int] = []
@@ -237,6 +302,12 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self._comparison_enabled = False
         self._solver_params: Dict[str, Any] = {}
         self._final_result_payload: Optional[Dict[str, Any]] = None
+        self._run_start_time: Optional[float] = None
+        self.top_runs: List[Dict[str, Any]] = []
+        self._overlay_top_runs = False
+        self.loaded_datasets: Dict[str, np.ndarray] = {}
+        self.batch_trial_distances: List[float] = []
+        self.batch_convergence_mode = "trial"
 
         self._animation_timer = QtCore.QTimer(self)
         self._animation_timer.setTimerType(QtCore.Qt.PreciseTimer)
@@ -264,6 +335,19 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         panel = QtWidgets.QWidget(self)
         vbox = QtWidgets.QVBoxLayout(panel)
         vbox.setSpacing(8)
+
+        data_group = QtWidgets.QGroupBox("Data")
+        data_form = QtWidgets.QFormLayout(data_group)
+
+        self.load_json_button = QtWidgets.QPushButton("Load Cities JSON")
+        self.load_json_button.clicked.connect(self._load_cities_json)
+
+        self.dataset_combo = QtWidgets.QComboBox()
+        self.dataset_combo.addItem("Random cities")
+        self.dataset_combo.currentIndexChanged.connect(self._on_dataset_changed)
+
+        data_form.addRow(self.load_json_button)
+        data_form.addRow("Dataset", self.dataset_combo)
 
         general_group = QtWidgets.QGroupBox("General")
         general_form = QtWidgets.QFormLayout(general_group)
@@ -399,6 +483,50 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         playback_form.addRow("Frame interval", self.animation_interval_spin)
         playback_form.addRow("Buffer limit", self.animation_buffer_limit_spin)
 
+        batch_group = QtWidgets.QGroupBox("Batch")
+        batch_form = QtWidgets.QFormLayout(batch_group)
+
+        self.batch_param_grid_edit = QtWidgets.QLineEdit()
+        self.batch_param_grid_edit.setPlaceholderText('{"mutation_rate": [0.01, 0.05], "crossover_type": ["pmx", "order"]}')
+        self.batch_param_grid_edit.setText('{"mutation_rate": [0.01, 0.05], "crossover_type": ["pmx", "order"]}')
+
+        self.batch_trials_spin = QtWidgets.QSpinBox()
+        self.batch_trials_spin.setRange(1, 100)
+        self.batch_trials_spin.setValue(2)
+
+        self.batch_seed_offset_spin = QtWidgets.QSpinBox()
+        self.batch_seed_offset_spin.setRange(0, 1_000_000_000)
+        self.batch_seed_offset_spin.setValue(42)
+
+        self.batch_top_n_spin = QtWidgets.QSpinBox()
+        self.batch_top_n_spin.setRange(1, 20)
+        self.batch_top_n_spin.setValue(10)
+
+        self.batch_convergence_mode_combo = QtWidgets.QComboBox()
+        self.batch_convergence_mode_combo.addItems(["Off", "Trial best distance", "Running best distance"])
+        self.batch_convergence_mode_combo.currentTextChanged.connect(self._on_batch_convergence_mode_changed)
+
+        self.overlay_top_runs_check = QtWidgets.QCheckBox("Overlay top 10 batch runs")
+        self.overlay_top_runs_check.toggled.connect(self._on_overlay_toggle)
+
+        self.batch_run_button = QtWidgets.QPushButton("Run Batch")
+        self.batch_clear_button = QtWidgets.QPushButton("Clear Outputs")
+
+        self.batch_run_button.clicked.connect(self._start_batch)
+        self.batch_clear_button.clicked.connect(self._clear_outputs)
+
+        batch_button_row = QtWidgets.QHBoxLayout()
+        batch_button_row.addWidget(self.batch_run_button)
+        batch_button_row.addWidget(self.batch_clear_button)
+
+        batch_form.addRow("Param grid", self.batch_param_grid_edit)
+        batch_form.addRow("Batch trials", self.batch_trials_spin)
+        batch_form.addRow("Seed offset", self.batch_seed_offset_spin)
+        batch_form.addRow("Top overlays", self.batch_top_n_spin)
+        batch_form.addRow("Convergence view", self.batch_convergence_mode_combo)
+        batch_form.addRow(self.overlay_top_runs_check)
+        batch_form.addRow(batch_button_row)
+
         buttons_row = QtWidgets.QHBoxLayout()
         self.run_button = QtWidgets.QPushButton("Run")
         self.stop_button = QtWidgets.QPushButton("Stop")
@@ -419,6 +547,8 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         vbox.addWidget(general_group)
         vbox.addWidget(simpleai_group)
         vbox.addWidget(playback_group)
+        vbox.addWidget(data_group)
+        vbox.addWidget(batch_group)
         vbox.addLayout(buttons_row)
         vbox.addWidget(self.status_label)
         vbox.addStretch(1)
@@ -460,15 +590,80 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         if self.tournament_spin.value() > pop_size:
             self.tournament_spin.setValue(pop_size)
 
+    def _parse_cities_json(self, payload: Any) -> Optional[np.ndarray]:
+        if isinstance(payload, dict):
+            if "cities" in payload:
+                payload = payload["cities"]
+            elif "points" in payload:
+                payload = payload["points"]
+
+        if not isinstance(payload, list):
+            return None
+
+        points: List[List[float]] = []
+        for item in payload:
+            if isinstance(item, dict):
+                if "x" in item and "y" in item:
+                    points.append([float(item["x"]), float(item["y"])])
+                elif "coord" in item and isinstance(item["coord"], (list, tuple)) and len(item["coord"]) >= 2:
+                    points.append([float(item["coord"][0]), float(item["coord"][1])])
+            elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                points.append([float(item[0]), float(item[1])])
+
+        if not points:
+            return None
+        return np.asarray(points, dtype=float)
+
+    def _load_cities_json(self) -> None:
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load cities JSON", "", "JSON Files (*.json)")
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            cities = self._parse_cities_json(payload)
+            if cities is None:
+                raise ValueError("JSON does not contain a valid 'cities' array or coordinate list.")
+
+            dataset_name = str(payload.get("name") if isinstance(payload, dict) and payload.get("name") else os.path.basename(file_path))
+            self.loaded_datasets[dataset_name] = cities
+
+            if self.dataset_combo.findText(dataset_name) == -1:
+                self.dataset_combo.addItem(dataset_name)
+            self.dataset_combo.setCurrentText(dataset_name)
+            self.current_cities = cities
+            self.num_cities_spin.setValue(int(cities.shape[0]))
+            self._draw_empty_route()
+            self.status_label.setText(f"Loaded {cities.shape[0]} cities from {dataset_name}")
+        except Exception as err:
+            QtWidgets.QMessageBox.critical(self, "Load JSON", str(err))
+
+    def _on_dataset_changed(self) -> None:
+        name = self.dataset_combo.currentText()
+        if name in self.loaded_datasets:
+            self.current_cities = self.loaded_datasets[name]
+            self.num_cities_spin.setValue(int(self.current_cities.shape[0]))
+            self._draw_empty_route()
+
+    def _on_batch_convergence_mode_changed(self, text: str) -> None:
+        self.batch_convergence_mode = "off" if text == "Off" else ("running" if text == "Running best distance" else "trial")
+        self._draw_convergence()
+
     def _is_solver_running(self) -> bool:
         return self._thread is not None and self._thread.isRunning()
 
+    def _is_batch_running(self) -> bool:
+        return self._batch_thread is not None and self._batch_thread.isRunning()
+
     def _is_busy(self) -> bool:
-        return self._is_solver_running() or bool(self.frame_buffer) or self._final_result_payload is not None
+        return self._is_solver_running() or self._is_batch_running() or bool(self.frame_buffer) or self._final_result_payload is not None
 
     def _update_run_stop_buttons(self) -> None:
         self.run_button.setEnabled(not self._is_busy())
-        self.stop_button.setEnabled(self._is_solver_running())
+        self.stop_button.setEnabled(self._is_solver_running() or self._is_batch_running())
+        if hasattr(self, "batch_run_button"):
+            self.batch_run_button.setEnabled(not self._is_busy())
 
     def _update_animation_interval(self, _value: int = 0) -> None:
         if self._animation_timer.isActive():
@@ -504,6 +699,13 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self.rendered_primary_count = 0
         self.rendered_compare_count = 0
         self._waiting_for_frames = False
+        self.batch_trial_distances = []
+
+    def _on_overlay_toggle(self, checked: bool) -> None:
+        self._overlay_top_runs = bool(checked)
+        if self._overlay_top_runs and self.top_runs:
+            self._draw_overlay_routes(self.route_ax_primary)
+            self.route_canvas.draw_idle()
 
     def _collect_params(self) -> Dict[str, Any]:
         seed_value: Optional[int]
@@ -551,6 +753,8 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self._draw_empty_convergence()
         self._start_playback_timer()
 
+        self._run_start_time = time.time()
+
         self._thread = QtCore.QThread(self)
         self._worker = SolverWorker(params)
         self._worker.moveToThread(self._thread)
@@ -568,6 +772,8 @@ class TSPControlPanel(QtWidgets.QMainWindow):
 
         self.run_button.setEnabled(False)
         self.stop_button.setEnabled(True)
+        if hasattr(self, "batch_run_button"):
+            self.batch_run_button.setEnabled(False)
         self.status_label.setText(self._format_runtime_status("Running solver + live animation"))
         self._thread.start()
 
@@ -575,6 +781,172 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         if self._worker is not None:
             self._worker.request_stop()
             self.status_label.setText("Stop requested. Waiting for current iteration...")
+        if self._batch_worker is not None:
+            self._batch_worker.request_stop()
+            self.status_label.setText("Stop requested for batch run...")
+
+    def _start_batch(self) -> None:
+        if self._is_busy():
+            self.status_label.setText("Busy with current run/playback")
+            return
+
+        try:
+            param_grid = json.loads(self.batch_param_grid_edit.text().strip() or "{}")
+        except json.JSONDecodeError as err:
+            QtWidgets.QMessageBox.warning(self, "Invalid JSON", f"Batch parameter grid is invalid: {err}")
+            return
+
+        if not isinstance(param_grid, dict):
+            QtWidgets.QMessageBox.warning(self, "Invalid JSON", "Batch parameter grid must be a JSON object.")
+            return
+
+        if self.current_cities is None:
+            self.current_cities = generate_cities(int(self.num_cities_spin.value()))
+
+        dist_matrix = compute_distance_matrix(self.current_cities)
+        base_config = self._collect_params()
+        self.top_runs = []
+        self._overlay_top_runs = self.overlay_top_runs_check.isChecked()
+        self.batch_trial_distances = []
+        num_trials = int(self.batch_trials_spin.value())
+        seed_offset = int(self.batch_seed_offset_spin.value())
+        base_experiment_name = f"batch_{self.backend_combo.currentText()}"
+
+        self._batch_thread = QtCore.QThread(self)
+        self._batch_worker = BatchWorker(
+            base_config,
+            param_grid,
+            self.current_cities,
+            dist_matrix,
+            base_experiment_name,
+            num_trials,
+            seed_offset,
+        )
+        self._batch_worker.moveToThread(self._batch_thread)
+
+        self._batch_thread.started.connect(self._batch_worker.run)
+        self._batch_worker.trial.connect(self._on_batch_trial)
+        self._batch_worker.finished.connect(self._on_batch_finished)
+        self._batch_worker.failed.connect(self._on_batch_failed)
+        self._batch_worker.finished.connect(self._batch_thread.quit)
+        self._batch_worker.failed.connect(self._batch_thread.quit)
+        self._batch_thread.finished.connect(self._cleanup_batch_thread)
+
+        self.batch_run_button.setEnabled(False)
+        self.run_button.setEnabled(False)
+        self.stop_button.setEnabled(False)
+        self.status_label.setText("Running batch experiment...")
+        self._batch_thread.start()
+
+    @QtCore.pyqtSlot(dict)
+    def _on_batch_trial(self, payload: Dict[str, Any]) -> None:
+        best_distance = payload.get("best_distance")
+        best_route = payload.get("best_route")
+        experiment_id = str(payload.get("experiment_id", "batch_trial"))
+
+        if best_distance is None or best_route is None:
+            return
+
+        self.top_runs.append(
+            {
+                "experiment_id": experiment_id,
+                "best_distance": float(best_distance),
+                "best_route": list(best_route),
+                "folder_path": payload.get("folder_path"),
+            }
+        )
+        self.top_runs.sort(key=lambda item: item["best_distance"])
+        self.top_runs = self.top_runs[: max(1, int(self.batch_top_n_spin.value()))]
+        self.batch_trial_distances.append(float(best_distance))
+
+        if self._overlay_top_runs:
+            self._draw_overlay_routes(self.route_ax_primary)
+            self.route_canvas.draw_idle()
+
+        self._draw_convergence()
+        self.status_label.setText(
+            f"Batch trial done | best: {float(best_distance):.4f} | top runs: {len(self.top_runs)}"
+        )
+
+    @QtCore.pyqtSlot(dict)
+    def _on_batch_finished(self, payload: Dict[str, Any]) -> None:
+        if self.top_runs:
+            self.status_label.setText(
+                f"Batch completed | best: {self.top_runs[0]['best_distance']:.4f} | runs: {len(self.top_runs)}"
+            )
+        else:
+            self.status_label.setText("Batch completed")
+
+    @QtCore.pyqtSlot(str)
+    def _on_batch_failed(self, message: str) -> None:
+        self.status_label.setText("Batch failed")
+        QtWidgets.QMessageBox.critical(self, "Batch Error", message)
+
+    def _cleanup_batch_thread(self) -> None:
+        if self._batch_worker is not None:
+            self._batch_worker.deleteLater()
+            self._batch_worker = None
+        if self._batch_thread is not None:
+            self._batch_thread.deleteLater()
+            self._batch_thread = None
+        self._update_run_stop_buttons()
+
+    def _draw_overlay_routes(self, axis) -> None:
+        if self.current_cities is None or not self.top_runs:
+            return
+
+        cities = self.current_cities
+        axis.clear()
+        axis.scatter(cities[:, 0], cities[:, 1], c="tab:red", s=35, zorder=3)
+        colors = ["tab:green", "tab:orange", "tab:purple", "tab:brown", "tab:pink", "tab:gray", "tab:olive", "tab:cyan", "tab:red", "tab:blue"]
+
+        for index, run in enumerate(self.top_runs):
+            route = run.get("best_route")
+            if not route:
+                continue
+            closed_route = list(route) + [route[0]]
+            ordered = cities[closed_route]
+            axis.plot(
+                ordered[:, 0],
+                ordered[:, 1],
+                color=colors[index % len(colors)],
+                linewidth=1.2,
+                alpha=max(0.15, 0.85 - 0.07 * index),
+                zorder=1,
+            )
+
+        axis.set_title(f"Batch overlay top {len(self.top_runs)} routes")
+        axis.set_xlabel("X")
+        axis.set_ylabel("Y")
+        axis.grid(alpha=0.3)
+        axis.set_aspect("equal", adjustable="box")
+
+    def _clear_outputs(self) -> None:
+        outputs_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "outputs")
+        if not os.path.isdir(outputs_dir):
+            QtWidgets.QMessageBox.information(self, "Clear Outputs", "No outputs folder found.")
+            return
+
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Clear Outputs",
+            f"Delete all files and folders inside {outputs_dir}?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
+        )
+        if reply != QtWidgets.QMessageBox.Yes:
+            return
+
+        try:
+            for name in os.listdir(outputs_dir):
+                path = os.path.join(outputs_dir, name)
+                if os.path.isdir(path):
+                    shutil.rmtree(path)
+                else:
+                    os.remove(path)
+            self.status_label.setText("Outputs cleared.")
+        except Exception as err:
+            QtWidgets.QMessageBox.critical(self, "Clear Outputs", str(err))
 
     def _reset_fields(self) -> None:
         self.backend_combo.setCurrentText(app_config.SOLVER_BACKEND)
@@ -784,6 +1156,17 @@ class TSPControlPanel(QtWidgets.QMainWindow):
             )
         )
 
+        # If extended metrics present, append average/std/diversity info
+        try:
+            avg_f = payload.get('avg_fitness', None)
+            div = payload.get('diversity', None)
+            if avg_f is not None:
+                self.status_label.setText(self.status_label.text() + f" | avg_fitness: {float(avg_f):.4f}")
+            if div is not None:
+                self.status_label.setText(self.status_label.text() + f" | diversity: {int(div)}")
+        except Exception:
+            pass
+
     def _finalize_completed_run(self, payload: Dict[str, Any]) -> None:
         self.current_cities = payload["cities"]
         backend = str(payload.get("backend", self._solver_params.get("backend", "primary"))).lower()
@@ -879,6 +1262,72 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self._final_result_payload = None
         self._waiting_for_frames = False
         self._stop_playback_timer_if_idle()
+
+        # Export experiment artifacts for GUI-run experiments
+        try:
+            from utils.exporter import Exporter
+            from utils.logger import setup_logger
+
+            exporter = Exporter()
+            # Experiment name reflect GUI run and basic params
+            cfg_name = (
+                f"gui_experiment_{self._solver_params.get('backend','run')}_pop{self._solver_params.get('pop_size',0)}"
+            )
+            folder_path = exporter.create_experiment_folder(cfg_name)
+            # Setup per-experiment logger file
+            setup_logger(folder_path)
+
+            # Save config
+            exporter.save_config(folder_path, dict(self._solver_params))
+
+            # Build metrics from recorded primary distances (best-so-far history)
+            metrics = []
+            prim_distances = list(self.primary_distances)
+            for i, d in enumerate(prim_distances, start=1):
+                metric = {
+                    'generation': i,
+                    'best_fitness': (1.0 / d) if d and d > 0 else None,
+                    'avg_fitness': None,
+                    'worst_fitness': None,
+                }
+                metrics.append(metric)
+
+            exporter.save_metrics(folder_path, metrics)
+
+            # Best solution
+            best_distance = float(primary_result.get('best_distance', float('inf')))
+            best_route = list(primary_result.get('best_route', []))
+            # convergence generation: index of minimum in best_distance_history
+            conv_gen = 0
+            try:
+                history = list(primary_result.get('best_distance_history', []))
+                if history:
+                    conv_gen = int(np.argmin(history)) + 1
+            except Exception:
+                conv_gen = 0
+
+            exporter.save_best_solution(folder_path, best_route, best_distance, conv_gen)
+
+            # Summary
+            runtime = None
+            try:
+                if self._run_start_time is not None:
+                    runtime = float(time.time() - self._run_start_time)
+            except Exception:
+                runtime = None
+            exporter.save_summary(folder_path, best_distance, len(primary_result.get('best_distance_history', [])), conv_gen, runtime if runtime is not None else 0.0)
+
+            # Population snapshot: save best route history as a lightweight snapshot
+            try:
+                snapshot = list(primary_result.get('best_route_history', []))
+                exporter.save_population_snapshot(folder_path, snapshot, len(snapshot))
+            except Exception:
+                # best_route_history may not be present; ignore
+                pass
+
+        except Exception:
+            # Do not interrupt UI on export failure; log to status
+            self.status_label.setText("Export failed: see console for details")
 
     def _draw_empty_route(self) -> None:
         backend_label = str(self._solver_params.get("backend", "backend")).lower()
@@ -997,6 +1446,34 @@ class TSPControlPanel(QtWidgets.QMainWindow):
                 [self.compare_steps[-1]],
                 [self.compare_distances[-1]],
                 color="tab:purple",
+                zorder=3,
+            )
+
+        if self.batch_convergence_mode != "off" and self.batch_trial_distances:
+            trial_steps = list(range(1, len(self.batch_trial_distances) + 1))
+            if self.batch_convergence_mode == "running":
+                batch_curve = []
+                running_best = float("inf")
+                for value in self.batch_trial_distances:
+                    running_best = min(running_best, float(value))
+                    batch_curve.append(running_best)
+                label = "batch running best"
+            else:
+                batch_curve = [float(value) for value in self.batch_trial_distances]
+                label = "batch trial best"
+
+            self.conv_ax.plot(
+                trial_steps,
+                batch_curve,
+                color="tab:orange",
+                linewidth=2,
+                marker="o",
+                label=label,
+            )
+            self.conv_ax.scatter(
+                [trial_steps[-1]],
+                [batch_curve[-1]],
+                color="tab:orange",
                 zorder=3,
             )
 
