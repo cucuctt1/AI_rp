@@ -65,6 +65,8 @@ def run_grid_search(
                             "folder_path": folder_path,
                         }
                     )
+                except RuntimeError:
+                    raise
                 except Exception:
                     pass
 

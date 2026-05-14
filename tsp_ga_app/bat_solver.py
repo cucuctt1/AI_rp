@@ -1,5 +1,6 @@
 import math
 import random
+import time
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -58,9 +59,9 @@ def _validate_route(route: Sequence[int], city_count: int) -> None:
         raise ValueError("Route is not a valid city permutation.")
 
 
-def _random_route(city_count: int) -> List[int]:
+def _random_route(city_count: int, rng: random.Random) -> List[int]:
     route = list(range(city_count))
-    random.shuffle(route)
+    rng.shuffle(route)
     return route
 
 
@@ -68,12 +69,12 @@ def _hamming_distance(route_a: Sequence[int], route_b: Sequence[int]) -> int:
     return sum(1 for city_a, city_b in zip(route_a, route_b) if city_a != city_b)
 
 
-def _random_inversion(route: Sequence[int]) -> List[int]:
+def _random_inversion(route: Sequence[int], rng: random.Random) -> List[int]:
     candidate = list(route)
     if len(candidate) < 2:
         return candidate
 
-    left, right = sorted(random.sample(range(len(candidate)), 2))
+    left, right = sorted(rng.sample(range(len(candidate)), 2))
     candidate[left : right + 1] = reversed(candidate[left : right + 1])
     return candidate
 
@@ -82,6 +83,7 @@ def _guided_move_towards_best(
     route: Sequence[int],
     global_best: Sequence[int],
     move_count: int,
+    rng: random.Random,
 ) -> List[int]:
     candidate = list(route)
     city_count = len(candidate)
@@ -91,21 +93,21 @@ def _guided_move_towards_best(
 
     iterations = max(1, min(int(move_count), city_count * 2))
     for _ in range(iterations):
-        position = random.randrange(city_count)
+        position = rng.randrange(city_count)
         target_city = global_best[position]
         current_index = candidate.index(target_city)
         if current_index != position:
             candidate[position], candidate[current_index] = candidate[current_index], candidate[position]
 
         # Keep exploration alive.
-        if random.random() < 0.25:
-            left, right = random.sample(range(city_count), 2)
+        if rng.random() < 0.25:
+            left, right = rng.sample(range(city_count), 2)
             candidate[left], candidate[right] = candidate[right], candidate[left]
 
     return candidate
 
 
-def _local_walk_near_best(global_best: Sequence[int], segment_max: int) -> List[int]:
+def _local_walk_near_best(global_best: Sequence[int], segment_max: int, rng: random.Random) -> List[int]:
     candidate = list(global_best)
     city_count = len(candidate)
 
@@ -113,12 +115,12 @@ def _local_walk_near_best(global_best: Sequence[int], segment_max: int) -> List[
         return candidate
 
     segment_size = max(2, min(segment_max, city_count))
-    left = random.randint(0, city_count - segment_size)
+    left = rng.randint(0, city_count - segment_size)
     right = left + segment_size
     candidate[left:right] = reversed(candidate[left:right])
 
-    if city_count >= 4 and random.random() < 0.5:
-        idx_a, idx_b = random.sample(range(city_count), 2)
+    if city_count >= 4 and rng.random() < 0.5:
+        idx_a, idx_b = rng.sample(range(city_count), 2)
         candidate[idx_a], candidate[idx_b] = candidate[idx_b], candidate[idx_a]
 
     return candidate
@@ -134,6 +136,7 @@ def bat_algorithm_tsp(
     elite_size: int = 0,
     tournament_size: int = 0,
     progress_callback: ProgressCallback = None,
+    rng: Optional[random.Random] = None,
 ) -> Tuple[List[int], float, List[float], List[List[int]], float]:
     """Run a bat-inspired metaheuristic for TSP (permutation-safe variant)."""
     _ = cities
@@ -155,7 +158,9 @@ def bat_algorithm_tsp(
     generations = max(1, int(generations))
     mutation_rate = max(0.0, min(1.0, float(mutation_rate)))
 
-    population: List[List[int]] = [_random_route(city_count) for _ in range(pop_size)]
+    rng = rng or random
+
+    population: List[List[int]] = [_random_route(city_count, rng) for _ in range(pop_size)]
     distances = [route_distance(route, matrix) for route in population]
 
     initial_best_distance = float(min(distances))
@@ -172,25 +177,25 @@ def bat_algorithm_tsp(
 
     for generation_idx in range(generations):
         for bat_idx in range(pop_size):
-            frequency = BAT_FREQUENCY_MIN + (BAT_FREQUENCY_MAX - BAT_FREQUENCY_MIN) * random.random()
+            frequency = BAT_FREQUENCY_MIN + (BAT_FREQUENCY_MAX - BAT_FREQUENCY_MIN) * rng.random()
             difference = _hamming_distance(population[bat_idx], best_route)
             velocities[bat_idx] += frequency * difference
 
             move_count = int(round(min(max(1.0, velocities[bat_idx]), float(BAT_MAX_GUIDED_MOVES))))
-            candidate = _guided_move_towards_best(population[bat_idx], best_route, move_count)
+            candidate = _guided_move_towards_best(population[bat_idx], best_route, move_count, rng)
 
-            if random.random() > pulse_rates[bat_idx]:
-                candidate = _local_walk_near_best(best_route, BAT_LOCAL_WALK_SEGMENT)
+            if rng.random() > pulse_rates[bat_idx]:
+                candidate = _local_walk_near_best(best_route, BAT_LOCAL_WALK_SEGMENT, rng)
 
-            if random.random() < mutation_rate:
-                candidate = _random_inversion(candidate)
+            if rng.random() < mutation_rate:
+                candidate = _random_inversion(candidate, rng)
 
             _validate_route(candidate, city_count)
             candidate_distance = route_distance(candidate, matrix)
 
             current_distance = distances[bat_idx]
             improved = candidate_distance < current_distance
-            accepted = improved and random.random() <= loudness[bat_idx]
+            accepted = improved and rng.random() <= loudness[bat_idx]
 
             if accepted or candidate_distance < best_distance:
                 population[bat_idx] = candidate
@@ -215,6 +220,8 @@ def bat_algorithm_tsp(
             best_route=best_route,
             best_distance=best_distance,
         )
+        if progress_callback is not None:
+            time.sleep(0)
 
     return (
         list(best_route),

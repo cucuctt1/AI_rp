@@ -1,3 +1,4 @@
+import time
 from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -113,9 +114,12 @@ def genetic_algorithm(
             }
             try:
                 progress_callback(payload)
+            except RuntimeError:
+                raise
             except Exception:
                 # Do not let progress reporting interrupt GA
                 pass
+            time.sleep(0)
 
         population = evolve_population(
             population=population,

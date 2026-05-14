@@ -4,6 +4,7 @@ import os
 import random
 import shutil
 import sys
+import threading
 import time
 import traceback
 from typing import Any, Deque, Dict, List, Optional
@@ -37,13 +38,30 @@ class SolverWorker(QtCore.QObject):
     @QtCore.pyqtSlot()
     def run(self) -> None:
         simpleai_overrides: Dict[str, Any] = {}
+        bat_thread: Optional[threading.Thread] = None
+        bat_state: Dict[str, Any] = {"result": None, "error": None, "stopped": False, "runtime": None}
+        primary_result: Optional[Dict[str, Any]] = None
+        comparison_result: Optional[Dict[str, Any]] = None
+        error_text: Optional[str] = None
+        stopped = False
+        cities: Optional[np.ndarray] = None
+        backend = ""
+        compare_enabled = False
+        primary_runtime: Optional[float] = None
+        total_runtime: Optional[float] = None
+        start_overall = time.perf_counter()
+
         try:
             seed = self.params["seed"]
             if seed is not None:
                 random.seed(seed)
                 np.random.seed(seed)
 
-            cities = generate_cities(int(self.params["num_cities"]))
+            cities = self.params.get("cities")
+            if cities is None:
+                cities = generate_cities(int(self.params["num_cities"]))
+            else:
+                cities = np.asarray(cities, dtype=float)
             dist_matrix = compute_distance_matrix(cities)
 
             backend = str(self.params["backend"]).strip().lower()
@@ -57,6 +75,49 @@ class SolverWorker(QtCore.QObject):
                 }
             )
 
+            if compare_enabled:
+                def run_bat() -> None:
+                    try:
+                        bat_start = time.perf_counter()
+                        bat_seed = int(seed) + 101 if seed is not None else None
+                        bat_rng = random.Random(bat_seed) if bat_seed is not None else random.Random()
+
+                        (
+                            bat_best_route,
+                            bat_best_distance,
+                            bat_distance_history,
+                            bat_route_history,
+                            bat_initial_best_distance,
+                        ) = bat_algorithm_tsp(
+                            cities=cities,
+                            dist_matrix=dist_matrix,
+                            pop_size=int(self.params["pop_size"]),
+                            generations=int(self.params["generations"]),
+                            mutation_rate=float(self.params["mutation_rate"]),
+                            progress_callback=self._build_progress_callback(source="bat", series_name="bat"),
+                            rng=bat_rng,
+                        )
+
+                        bat_state["result"] = self._pack_solver_result(
+                            label="bat",
+                            best_route=bat_best_route,
+                            best_distance=bat_best_distance,
+                            best_distance_history=bat_distance_history,
+                            best_route_history=bat_route_history,
+                            initial_best_distance=bat_initial_best_distance,
+                        )
+                        bat_state["runtime"] = time.perf_counter() - bat_start
+                    except RuntimeError as err:
+                        if str(err) == STOP_EXCEPTION_TEXT:
+                            bat_state["stopped"] = True
+                        else:
+                            bat_state["error"] = traceback.format_exc()
+                    except Exception:
+                        bat_state["error"] = traceback.format_exc()
+
+                bat_thread = threading.Thread(target=run_bat, name="bat-comparison")
+                bat_thread.start()
+
             if backend == "simpleai":
                 simpleai_overrides = self._apply_simpleai_runtime_overrides()
                 solver = genetic_algorithm_simpleai
@@ -65,6 +126,7 @@ class SolverWorker(QtCore.QObject):
             else:
                 raise ValueError("Backend must be either 'custom' or 'simpleai'.")
 
+            primary_start = time.perf_counter()
             (
                 best_route,
                 best_distance,
@@ -82,6 +144,7 @@ class SolverWorker(QtCore.QObject):
                 tournament_size=int(self.params["tournament_size"]),
                 progress_callback=self._build_progress_callback(source="primary", series_name=backend),
             )
+            primary_runtime = time.perf_counter() - primary_start
 
             primary_result = self._pack_solver_result(
                 label=backend,
@@ -93,67 +156,57 @@ class SolverWorker(QtCore.QObject):
             )
 
             if self._stop_requested:
-                self.stopped.emit()
-                return
-
-            comparison_result: Optional[Dict[str, Any]] = None
-            if compare_enabled:
-                if seed is not None:
-                    random.seed(int(seed) + 101)
-                    np.random.seed(int(seed) + 101)
-
-                (
-                    bat_best_route,
-                    bat_best_distance,
-                    bat_distance_history,
-                    bat_route_history,
-                    bat_initial_best_distance,
-                ) = bat_algorithm_tsp(
-                    cities=cities,
-                    dist_matrix=dist_matrix,
-                    pop_size=int(self.params["pop_size"]),
-                    generations=int(self.params["generations"]),
-                    mutation_rate=float(self.params["mutation_rate"]),
-                    progress_callback=self._build_progress_callback(source="bat", series_name="bat"),
-                )
-
-                comparison_result = self._pack_solver_result(
-                    label="bat",
-                    best_route=bat_best_route,
-                    best_distance=bat_best_distance,
-                    best_distance_history=bat_distance_history,
-                    best_route_history=bat_route_history,
-                    initial_best_distance=bat_initial_best_distance,
-                )
-
-            if self._stop_requested:
-                self.stopped.emit()
-                return
-
-            self.finished.emit(
-                {
-                    "cities": cities,
-                    "backend": backend,
-                    "comparison_enabled": compare_enabled,
-                    "primary_result": primary_result,
-                    "comparison_result": comparison_result,
-                    # Compatibility keys kept for existing non-comparison code paths.
-                    "best_route": list(primary_result["best_route"]),
-                    "best_distance": float(primary_result["best_distance"]),
-                    "best_distance_history": list(primary_result["best_distance_history"]),
-                    "best_route_history": [list(route) for route in primary_result["best_route_history"]],
-                    "initial_best_distance": float(primary_result["initial_best_distance"]),
-                }
-            )
+                stopped = True
         except RuntimeError as err:
             if str(err) == STOP_EXCEPTION_TEXT:
-                self.stopped.emit()
+                stopped = True
             else:
-                self.failed.emit(traceback.format_exc())
+                error_text = traceback.format_exc()
         except Exception:
-            self.failed.emit(traceback.format_exc())
+            error_text = traceback.format_exc()
         finally:
             self._restore_simpleai_runtime_overrides(simpleai_overrides)
+
+        if bat_thread is not None:
+            if stopped or error_text is not None:
+                self._stop_requested = True
+            bat_thread.join()
+            if bat_state.get("error") and error_text is None:
+                error_text = str(bat_state["error"])
+            if bat_state.get("stopped"):
+                stopped = True
+            comparison_result = bat_state.get("result")
+
+        if stopped:
+            self.stopped.emit()
+            return
+        if error_text is not None:
+            self.failed.emit(error_text)
+            return
+        if cities is None or primary_result is None:
+            self.failed.emit("Solver failed to return a result.")
+            return
+
+        total_runtime = time.perf_counter() - start_overall
+
+        self.finished.emit(
+            {
+                "cities": cities,
+                "backend": backend,
+                "comparison_enabled": compare_enabled,
+                "primary_result": primary_result,
+                "comparison_result": comparison_result,
+                "runtime_primary": primary_runtime,
+                "runtime_bat": bat_state.get("runtime"),
+                "runtime_total": total_runtime,
+                # Compatibility keys kept for existing non-comparison code paths.
+                "best_route": list(primary_result["best_route"]),
+                "best_distance": float(primary_result["best_distance"]),
+                "best_distance_history": list(primary_result["best_distance_history"]),
+                "best_route_history": [list(route) for route in primary_result["best_route_history"]],
+                "initial_best_distance": float(primary_result["initial_best_distance"]),
+            }
+        )
 
     def _build_progress_callback(self, source: str, series_name: str):
         def progress_callback(payload: Dict[str, Any]) -> None:
@@ -308,6 +361,7 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self.loaded_datasets: Dict[str, np.ndarray] = {}
         self.batch_trial_distances: List[float] = []
         self.batch_convergence_mode = "trial"
+        self._stop_requested_ui = False
 
         self._animation_timer = QtCore.QTimer(self)
         self._animation_timer.setTimerType(QtCore.Qt.PreciseTimer)
@@ -346,8 +400,12 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self.dataset_combo.addItem("Random cities")
         self.dataset_combo.currentIndexChanged.connect(self._on_dataset_changed)
 
+        self.apply_dataset_button = QtWidgets.QPushButton("Load to space")
+        self.apply_dataset_button.clicked.connect(self._apply_selected_dataset)
+
         data_form.addRow(self.load_json_button)
         data_form.addRow("Dataset", self.dataset_combo)
+        data_form.addRow(self.apply_dataset_button)
 
         general_group = QtWidgets.QGroupBox("General")
         general_form = QtWidgets.QFormLayout(general_group)
@@ -590,6 +648,44 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         if self.tournament_spin.value() > pop_size:
             self.tournament_spin.setValue(pop_size)
 
+    def _draw_city_scatter(self, title: str) -> None:
+        if self.current_cities is None:
+            self._draw_empty_route()
+            return
+
+        self.route_ax_primary.clear()
+        self.route_ax_primary.scatter(self.current_cities[:, 0], self.current_cities[:, 1], c="tab:red", s=35)
+        self.route_ax_primary.set_title(title)
+        self.route_ax_primary.set_xlabel("X")
+        self.route_ax_primary.set_ylabel("Y")
+        self.route_ax_primary.grid(alpha=0.3)
+        self.route_ax_primary.set_aspect("equal", adjustable="box")
+
+        self._draw_route_axis_placeholder(
+            axis=self.route_ax_compare,
+            title="BAT comparison",
+            message="Run solver to compare",
+        )
+        self.route_canvas.draw_idle()
+
+    def _extract_city_point(self, item: Any) -> Optional[List[float]]:
+        if isinstance(item, dict):
+            if "x" in item and "y" in item:
+                return [float(item["x"]), float(item["y"])]
+            if "coord" in item and isinstance(item["coord"], (list, tuple)) and len(item["coord"]) >= 2:
+                return [float(item["coord"][0]), float(item["coord"][1])]
+        elif isinstance(item, (list, tuple)) and len(item) >= 2:
+            return [float(item[0]), float(item[1])]
+        return None
+
+    def _looks_like_point_map(self, payload: Dict[Any, Any]) -> bool:
+        if not payload:
+            return False
+        for value in payload.values():
+            if self._extract_city_point(value) is None:
+                return False
+        return True
+
     def _parse_cities_json(self, payload: Any) -> Optional[np.ndarray]:
         if isinstance(payload, dict):
             if "cities" in payload:
@@ -597,22 +693,63 @@ class TSPControlPanel(QtWidgets.QMainWindow):
             elif "points" in payload:
                 payload = payload["points"]
 
-        if not isinstance(payload, list):
-            return None
-
         points: List[List[float]] = []
-        for item in payload:
-            if isinstance(item, dict):
-                if "x" in item and "y" in item:
-                    points.append([float(item["x"]), float(item["y"])])
-                elif "coord" in item and isinstance(item["coord"], (list, tuple)) and len(item["coord"]) >= 2:
-                    points.append([float(item["coord"][0]), float(item["coord"][1])])
-            elif isinstance(item, (list, tuple)) and len(item) >= 2:
-                points.append([float(item[0]), float(item[1])])
+
+        if isinstance(payload, dict):
+            def sort_key(item: Any) -> Any:
+                key = item[0]
+                if isinstance(key, int):
+                    return (0, key)
+                if isinstance(key, str) and key.isdigit():
+                    return (0, int(key))
+                return (1, str(key))
+
+            for _, value in sorted(payload.items(), key=sort_key):
+                point = self._extract_city_point(value)
+                if point is not None:
+                    points.append(point)
+        elif isinstance(payload, list):
+            for item in payload:
+                point = self._extract_city_point(item)
+                if point is not None:
+                    points.append(point)
+        else:
+            return None
 
         if not points:
             return None
         return np.asarray(points, dtype=float)
+
+    def _extract_city_datasets(self, payload: Any, fallback_name: str) -> Dict[str, np.ndarray]:
+        datasets: Dict[str, np.ndarray] = {}
+
+        if isinstance(payload, dict):
+            if "cities" in payload or "points" in payload:
+                dataset_name = str(payload.get("name")) if payload.get("name") else fallback_name
+                cities = self._parse_cities_json(payload)
+                if cities is not None:
+                    datasets[dataset_name] = cities
+                return datasets
+
+            if self._looks_like_point_map(payload):
+                cities = self._parse_cities_json(payload)
+                if cities is not None:
+                    datasets[fallback_name] = cities
+                return datasets
+
+            for key, value in payload.items():
+                if key in {"name", "description"}:
+                    continue
+                cities = self._parse_cities_json(value)
+                if cities is not None:
+                    datasets[str(key)] = cities
+            return datasets
+
+        if isinstance(payload, list):
+            cities = self._parse_cities_json(payload)
+            if cities is not None:
+                datasets[fallback_name] = cities
+        return datasets
 
     def _load_cities_json(self) -> None:
         file_path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Load cities JSON", "", "JSON Files (*.json)")
@@ -622,29 +759,51 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         try:
             with open(file_path, "r", encoding="utf-8") as handle:
                 payload = json.load(handle)
-            cities = self._parse_cities_json(payload)
-            if cities is None:
-                raise ValueError("JSON does not contain a valid 'cities' array or coordinate list.")
+            file_label = os.path.basename(file_path)
+            datasets = self._extract_city_datasets(payload, file_label)
+            if not datasets:
+                raise ValueError("JSON does not contain a valid city coordinate list or dataset map.")
 
-            dataset_name = str(payload.get("name") if isinstance(payload, dict) and payload.get("name") else os.path.basename(file_path))
-            self.loaded_datasets[dataset_name] = cities
+            for name, cities in datasets.items():
+                self.loaded_datasets[name] = cities
+                if self.dataset_combo.findText(name) == -1:
+                    self.dataset_combo.addItem(name)
 
-            if self.dataset_combo.findText(dataset_name) == -1:
-                self.dataset_combo.addItem(dataset_name)
-            self.dataset_combo.setCurrentText(dataset_name)
-            self.current_cities = cities
-            self.num_cities_spin.setValue(int(cities.shape[0]))
-            self._draw_empty_route()
-            self.status_label.setText(f"Loaded {cities.shape[0]} cities from {dataset_name}")
+            active_name = next(iter(datasets))
+            self.dataset_combo.setCurrentText(active_name)
+            self._apply_selected_dataset()
+
+            if len(datasets) == 1:
+                self.status_label.setText(
+                    f"Loaded {self.current_cities.shape[0]} cities from {active_name}"
+                )
+            else:
+                self.status_label.setText(
+                    f"Loaded {len(datasets)} datasets from {file_label}"
+                )
         except Exception as err:
             QtWidgets.QMessageBox.critical(self, "Load JSON", str(err))
 
-    def _on_dataset_changed(self) -> None:
+    def _apply_selected_dataset(self) -> None:
         name = self.dataset_combo.currentText()
         if name in self.loaded_datasets:
             self.current_cities = self.loaded_datasets[name]
             self.num_cities_spin.setValue(int(self.current_cities.shape[0]))
-            self._draw_empty_route()
+            self._draw_city_scatter(f"Loaded dataset: {name}")
+            self.status_label.setText(f"Loaded dataset {name}")
+            return
+
+        num_cities = int(self.num_cities_spin.value())
+        self.current_cities = generate_cities(num_cities)
+        self._draw_city_scatter(f"Random cities ({num_cities})")
+        self.status_label.setText(f"Generated {num_cities} random cities")
+
+    def _on_dataset_changed(self) -> None:
+        name = self.dataset_combo.currentText()
+        if name in self.loaded_datasets:
+            self.status_label.setText(f"Selected dataset {name}. Click 'Load to space' to display.")
+        else:
+            self.status_label.setText("Selected random cities. Click 'Load to space' to display.")
 
     def _on_batch_convergence_mode_changed(self, text: str) -> None:
         self.batch_convergence_mode = "off" if text == "Off" else ("running" if text == "Running best distance" else "trial")
@@ -744,16 +903,23 @@ class TSPControlPanel(QtWidgets.QMainWindow):
             self.status_label.setText(self._format_runtime_status("Busy with current run/playback"))
             return
 
+        self._stop_requested_ui = False
         params = self._collect_params()
         self._solver_params = dict(params)
         self._comparison_enabled = bool(params.get("enable_bat_comparison", False))
-        self.current_cities = None
         self._reset_live_state()
         self._draw_empty_route()
         self._draw_empty_convergence()
         self._start_playback_timer()
 
         self._run_start_time = time.time()
+
+        if self.current_cities is None:
+            self.current_cities = generate_cities(int(params["num_cities"]))
+
+        params["num_cities"] = int(self.current_cities.shape[0])
+        params["cities"] = np.asarray(self.current_cities, dtype=float)
+        self._solver_params["num_cities"] = int(self.current_cities.shape[0])
 
         self._thread = QtCore.QThread(self)
         self._worker = SolverWorker(params)
@@ -778,17 +944,25 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self._thread.start()
 
     def _stop_solver(self) -> None:
+        self._stop_requested_ui = True
         if self._worker is not None:
             self._worker.request_stop()
-            self.status_label.setText("Stop requested. Waiting for current iteration...")
         if self._batch_worker is not None:
             self._batch_worker.request_stop()
-            self.status_label.setText("Stop requested for batch run...")
+        self.frame_buffer.clear()
+        self._final_result_payload = None
+        self._waiting_for_frames = False
+        if self._animation_timer.isActive():
+            self._animation_timer.stop()
+        self.status_label.setText("Stop requested. Waiting for current iteration...")
+        self._update_run_stop_buttons()
 
     def _start_batch(self) -> None:
         if self._is_busy():
             self.status_label.setText("Busy with current run/playback")
             return
+
+        self._stop_requested_ui = False
 
         try:
             param_grid = json.loads(self.batch_param_grid_edit.text().strip() or "{}")
@@ -834,12 +1008,14 @@ class TSPControlPanel(QtWidgets.QMainWindow):
 
         self.batch_run_button.setEnabled(False)
         self.run_button.setEnabled(False)
-        self.stop_button.setEnabled(False)
+        self.stop_button.setEnabled(True)
         self.status_label.setText("Running batch experiment...")
         self._batch_thread.start()
 
     @QtCore.pyqtSlot(dict)
     def _on_batch_trial(self, payload: Dict[str, Any]) -> None:
+        if self._stop_requested_ui:
+            return
         best_distance = payload.get("best_distance")
         best_route = payload.get("best_route")
         experiment_id = str(payload.get("experiment_id", "batch_trial"))
@@ -879,6 +1055,9 @@ class TSPControlPanel(QtWidgets.QMainWindow):
 
     @QtCore.pyqtSlot(str)
     def _on_batch_failed(self, message: str) -> None:
+        if message == STOP_EXCEPTION_TEXT:
+            self.status_label.setText("Batch stopped by user.")
+            return
         self.status_label.setText("Batch failed")
         QtWidgets.QMessageBox.critical(self, "Batch Error", message)
 
@@ -889,6 +1068,7 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         if self._batch_thread is not None:
             self._batch_thread.deleteLater()
             self._batch_thread = None
+        self._stop_requested_ui = False
         self._update_run_stop_buttons()
 
     def _draw_overlay_routes(self, axis) -> None:
@@ -976,6 +1156,8 @@ class TSPControlPanel(QtWidgets.QMainWindow):
 
     @QtCore.pyqtSlot(dict)
     def _on_progress(self, payload: Dict[str, Any]) -> None:
+        if self._stop_requested_ui:
+            return
         event = payload.get("event")
         if event == "init":
             cities = payload.get("cities")
@@ -1014,6 +1196,7 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self.frame_buffer.clear()
         self._final_result_payload = None
         self._waiting_for_frames = False
+        self._stop_requested_ui = False
         if self._animation_timer.isActive():
             self._animation_timer.stop()
         self.status_label.setText("Solver failed. See error details.")
@@ -1025,6 +1208,7 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self.frame_buffer.clear()
         self._final_result_payload = None
         self._waiting_for_frames = False
+        self._stop_requested_ui = False
         if self._animation_timer.isActive():
             self._animation_timer.stop()
         self.status_label.setText("Solver stopped by user.")
@@ -1039,6 +1223,8 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         if self._thread is not None:
             self._thread.deleteLater()
             self._thread = None
+
+        self._stop_requested_ui = False
 
         if self._final_result_payload is not None and not self.frame_buffer:
             self._finalize_completed_run(self._final_result_payload)
@@ -1171,6 +1357,17 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self.current_cities = payload["cities"]
         backend = str(payload.get("backend", self._solver_params.get("backend", "primary"))).lower()
 
+        runtime_total = payload.get("runtime_total")
+        runtime_primary = payload.get("runtime_primary")
+        runtime_bat = payload.get("runtime_bat")
+        if runtime_total is None and self._run_start_time is not None:
+            runtime_total = float(time.time() - self._run_start_time)
+
+        def fmt_runtime(value: Optional[float]) -> str:
+            if value is None:
+                return "n/a"
+            return f"{value:.3f}s"
+
         primary_result = payload.get("primary_result")
         if not isinstance(primary_result, dict):
             primary_result = {
@@ -1244,18 +1441,22 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         if self._comparison_enabled and isinstance(comparison_result, dict):
             bat_best = float(comparison_result["best_distance"])
             delta = bat_best - primary_best
+            runtime_note = f" | Solve time: {fmt_runtime(runtime_total)}"
+            if runtime_primary is not None or runtime_bat is not None:
+                runtime_note += f" | primary: {fmt_runtime(runtime_primary)} | BAT: {fmt_runtime(runtime_bat)}"
             self.status_label.setText(
                 (
                     f"Completed | {backend}: {primary_best:.4f} | BAT: {bat_best:.4f} | "
-                    f"BAT-primary delta: {delta:.4f} | Dropped: {self.dropped_frame_count}"
+                    f"BAT-primary delta: {delta:.4f}{runtime_note} | Dropped: {self.dropped_frame_count}"
                 )
             )
         else:
+            runtime_note = f" | Solve time: {fmt_runtime(runtime_total)}"
             self.status_label.setText(
                 (
                     f"Completed | Best distance: {primary_best:.4f} | "
                     f"Improvement: {primary_improvement:.4f} ({primary_improvement_pct:.2f}%) | "
-                    f"Rendered primary: {self.rendered_primary_count} | Dropped: {self.dropped_frame_count}"
+                    f"Rendered primary: {self.rendered_primary_count}{runtime_note} | Dropped: {self.dropped_frame_count}"
                 )
             )
 
@@ -1311,11 +1512,18 @@ class TSPControlPanel(QtWidgets.QMainWindow):
             # Summary
             runtime = None
             try:
-                if self._run_start_time is not None:
+                runtime = payload.get("runtime_total")
+                if runtime is None and self._run_start_time is not None:
                     runtime = float(time.time() - self._run_start_time)
             except Exception:
                 runtime = None
-            exporter.save_summary(folder_path, best_distance, len(primary_result.get('best_distance_history', [])), conv_gen, runtime if runtime is not None else 0.0)
+            exporter.save_summary(
+                folder_path,
+                best_distance,
+                len(primary_result.get('best_distance_history', [])),
+                conv_gen,
+                runtime if runtime is not None else 0.0,
+            )
 
             # Population snapshot: save best route history as a lightweight snapshot
             try:
