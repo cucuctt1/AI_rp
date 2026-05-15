@@ -1,5 +1,6 @@
 import numpy as np
 import os
+import random
 from core.ga_engine import GAEngine
 from core.config import DEFAULT_CONFIG
 from utils.exporter import Exporter
@@ -8,6 +9,7 @@ from utils.logger import setup_logger
 def run_single_experiment(experiment_name: str, config: dict, dist_matrix: np.ndarray, cities: np.ndarray = None, seed: int = None):
     if seed is not None:
         np.random.seed(seed)
+        random.seed(seed)
         
     exporter = Exporter()
     folder_path = exporter.create_experiment_folder(experiment_name)

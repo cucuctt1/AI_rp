@@ -362,6 +362,25 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self.batch_trial_distances: List[float] = []
         self.batch_convergence_mode = "trial"
         self._stop_requested_ui = False
+        self.run_history: List[Dict[str, Any]] = []
+        self._run_counter = 0
+        self._focused_run_index: Optional[int] = None
+        self._raw_primary_steps: List[int] = []
+        self._raw_primary_distances: List[float] = []
+        self._raw_primary_avg_fitness: List[float] = []
+        self._raw_primary_diversity: List[int] = []
+        self._raw_primary_avg_steps: List[int] = []
+        self._raw_primary_div_steps: List[int] = []
+        self._raw_compare_steps: List[int] = []
+        self._raw_compare_distances: List[float] = []
+        self._raw_compare_avg_fitness: List[float] = []
+        self._raw_compare_diversity: List[int] = []
+        self._raw_compare_avg_steps: List[int] = []
+        self._raw_compare_div_steps: List[int] = []
+        self._latest_primary_metrics: Dict[str, Optional[float]] = {"avg_fitness": None, "diversity": None}
+        self._metrics_dialog: Optional[QtWidgets.QDialog] = None
+        self._metrics_canvas: Optional[FigureCanvas] = None
+        self._metrics_ax = None
 
         self._animation_timer = QtCore.QTimer(self)
         self._animation_timer.setTimerType(QtCore.Qt.PreciseTimer)
@@ -381,8 +400,13 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         controls = self._build_controls_panel()
         plots = self._build_plots_panel()
 
-        controls.setMaximumWidth(380)
-        layout.addWidget(controls)
+        controls_scroll = QtWidgets.QScrollArea(self)
+        controls_scroll.setWidget(controls)
+        controls_scroll.setWidgetResizable(True)
+        controls_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        controls_scroll.setMaximumWidth(380)
+
+        layout.addWidget(controls_scroll)
         layout.addWidget(plots, stretch=1)
 
     def _build_controls_panel(self) -> QtWidgets.QWidget:
@@ -403,9 +427,17 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self.apply_dataset_button = QtWidgets.QPushButton("Load to space")
         self.apply_dataset_button.clicked.connect(self._apply_selected_dataset)
 
+        self.city_seed_check = QtWidgets.QCheckBox("Use city seed")
+        self.city_seed_spin = QtWidgets.QSpinBox()
+        self.city_seed_spin.setRange(0, 1_000_000_000)
+        self.city_seed_spin.setValue(42)
+        self.city_seed_spin.setEnabled(False)
+        self.city_seed_check.toggled.connect(self.city_seed_spin.setEnabled)
+
         data_form.addRow(self.load_json_button)
         data_form.addRow("Dataset", self.dataset_combo)
         data_form.addRow(self.apply_dataset_button)
+        data_form.addRow(self.city_seed_check, self.city_seed_spin)
 
         general_group = QtWidgets.QGroupBox("General")
         general_form = QtWidgets.QFormLayout(general_group)
@@ -541,6 +573,35 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         playback_form.addRow("Frame interval", self.animation_interval_spin)
         playback_form.addRow("Buffer limit", self.animation_buffer_limit_spin)
 
+        convergence_group = QtWidgets.QGroupBox("Convergence view")
+        convergence_form = QtWidgets.QFormLayout(convergence_group)
+
+        self.convergence_metric_combo = QtWidgets.QComboBox()
+        self.convergence_metric_combo.addItems([
+            "Best distance",
+            "Avg fitness",
+            "Diversity",
+            "Convergence speed",
+        ])
+        self.convergence_metric_combo.currentTextChanged.connect(self._on_convergence_metric_changed)
+
+        self.run_focus_combo = QtWidgets.QComboBox()
+        self.run_focus_combo.addItem("All runs")
+        self.run_focus_combo.currentIndexChanged.connect(self._on_run_focus_changed)
+
+        self.reset_convergence_button = QtWidgets.QPushButton("Reset convergence")
+        self.reset_convergence_button.clicked.connect(self._reset_convergence_history)
+
+        self.show_metrics_button = QtWidgets.QPushButton("Show metrics")
+        self.show_metrics_button.clicked.connect(self._show_metrics_window)
+
+        convergence_form.addRow("Metric", self.convergence_metric_combo)
+        convergence_form.addRow("Focus run", self.run_focus_combo)
+        convergence_buttons = QtWidgets.QHBoxLayout()
+        convergence_buttons.addWidget(self.reset_convergence_button)
+        convergence_buttons.addWidget(self.show_metrics_button)
+        convergence_form.addRow(convergence_buttons)
+
         batch_group = QtWidgets.QGroupBox("Batch")
         batch_form = QtWidgets.QFormLayout(batch_group)
 
@@ -605,6 +666,7 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         vbox.addWidget(general_group)
         vbox.addWidget(simpleai_group)
         vbox.addWidget(playback_group)
+        vbox.addWidget(convergence_group)
         vbox.addWidget(data_group)
         vbox.addWidget(batch_group)
         vbox.addLayout(buttons_row)
@@ -647,6 +709,13 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self.tournament_spin.setMaximum(pop_size)
         if self.tournament_spin.value() > pop_size:
             self.tournament_spin.setValue(pop_size)
+
+    def _generate_random_cities(self, count: int) -> np.ndarray:
+        if hasattr(self, "city_seed_check") and self.city_seed_check.isChecked():
+            seed = int(self.city_seed_spin.value())
+            rng = np.random.default_rng(seed)
+            return rng.uniform(0.0, 100.0, size=(count, 2))
+        return generate_cities(count)
 
     def _draw_city_scatter(self, title: str) -> None:
         if self.current_cities is None:
@@ -794,7 +863,7 @@ class TSPControlPanel(QtWidgets.QMainWindow):
             return
 
         num_cities = int(self.num_cities_spin.value())
-        self.current_cities = generate_cities(num_cities)
+        self.current_cities = self._generate_random_cities(num_cities)
         self._draw_city_scatter(f"Random cities ({num_cities})")
         self.status_label.setText(f"Generated {num_cities} random cities")
 
@@ -808,6 +877,208 @@ class TSPControlPanel(QtWidgets.QMainWindow):
     def _on_batch_convergence_mode_changed(self, text: str) -> None:
         self.batch_convergence_mode = "off" if text == "Off" else ("running" if text == "Running best distance" else "trial")
         self._draw_convergence()
+
+    def _on_convergence_metric_changed(self, _text: str) -> None:
+        self._draw_convergence()
+        self._update_metrics_plot()
+
+    def _on_run_focus_changed(self, index: int) -> None:
+        self._focused_run_index = index - 1 if index > 0 else None
+        self._draw_convergence()
+        self._update_metrics_plot()
+
+    def _get_focus_index(self) -> Optional[int]:
+        return self._focused_run_index
+
+    def _refresh_run_focus_combo(self) -> None:
+        if not hasattr(self, "run_focus_combo"):
+            return
+
+        current_focus = self._focused_run_index
+        self.run_focus_combo.blockSignals(True)
+        self.run_focus_combo.clear()
+        self.run_focus_combo.addItem("All runs")
+        for idx in range(len(self.run_history)):
+            self.run_focus_combo.addItem(f"Run {idx + 1}")
+        self.run_focus_combo.blockSignals(False)
+
+        if current_focus is None:
+            self.run_focus_combo.setCurrentIndex(0)
+        else:
+            focus_index = min(current_focus + 1, self.run_focus_combo.count() - 1)
+            self.run_focus_combo.setCurrentIndex(focus_index)
+
+    def _reset_convergence_history(self) -> None:
+        self.run_history = []
+        self._run_counter = 0
+        self.batch_trial_distances = []
+        self._focused_run_index = None
+        self._refresh_run_focus_combo()
+        self._draw_convergence()
+        self._update_metrics_plot()
+
+    def _record_live_metrics(self, payload: Dict[str, Any]) -> None:
+        source = str(payload.get("source", "primary")).lower()
+        generation = payload.get("generation")
+        distance = payload.get("best_distance")
+        avg_fitness = payload.get("avg_fitness")
+        diversity = payload.get("diversity")
+
+        if source == "bat":
+            if generation is not None:
+                self._raw_compare_steps.append(int(generation))
+            if distance is not None:
+                self._raw_compare_distances.append(float(distance))
+            if avg_fitness is not None:
+                self._raw_compare_avg_fitness.append(float(avg_fitness))
+                if generation is not None:
+                    self._raw_compare_avg_steps.append(int(generation))
+            if diversity is not None:
+                self._raw_compare_diversity.append(int(diversity))
+                if generation is not None:
+                    self._raw_compare_div_steps.append(int(generation))
+            return
+
+        if generation is not None:
+            self._raw_primary_steps.append(int(generation))
+        if distance is not None:
+            self._raw_primary_distances.append(float(distance))
+        if avg_fitness is not None:
+            self._raw_primary_avg_fitness.append(float(avg_fitness))
+            if generation is not None:
+                self._raw_primary_avg_steps.append(int(generation))
+            self._latest_primary_metrics["avg_fitness"] = float(avg_fitness)
+        if diversity is not None:
+            self._raw_primary_diversity.append(int(diversity))
+            if generation is not None:
+                self._raw_primary_div_steps.append(int(generation))
+            self._latest_primary_metrics["diversity"] = float(diversity)
+
+    def _show_metrics_window(self) -> None:
+        if self._metrics_dialog is None:
+            dialog = QtWidgets.QDialog(self)
+            dialog.setWindowTitle("Run metrics")
+            dialog.resize(800, 520)
+
+            layout = QtWidgets.QVBoxLayout(dialog)
+            controls = QtWidgets.QHBoxLayout()
+
+            self.metrics_chart_combo = QtWidgets.QComboBox()
+            self.metrics_chart_combo.addItems(["Dispersion (boxplot)", "Convergence speed"])
+            self.metrics_chart_combo.currentTextChanged.connect(self._update_metrics_plot)
+
+            self.metrics_value_combo = QtWidgets.QComboBox()
+            self.metrics_value_combo.addItems(["Best distance", "Runtime", "Avg fitness", "Diversity"])
+            self.metrics_value_combo.currentTextChanged.connect(self._update_metrics_plot)
+
+            controls.addWidget(QtWidgets.QLabel("Chart"))
+            controls.addWidget(self.metrics_chart_combo)
+            controls.addWidget(QtWidgets.QLabel("Metric"))
+            controls.addWidget(self.metrics_value_combo)
+            controls.addStretch(1)
+
+            layout.addLayout(controls)
+
+            figure = Figure(figsize=(8, 4.5), tight_layout=True)
+            self._metrics_canvas = FigureCanvas(figure)
+            self._metrics_ax = figure.add_subplot(111)
+            layout.addWidget(self._metrics_canvas)
+
+            self._metrics_dialog = dialog
+
+        self._update_metrics_plot()
+        self._metrics_dialog.show()
+        self._metrics_dialog.raise_()
+        self._metrics_dialog.activateWindow()
+
+    def _update_metrics_plot(self) -> None:
+        if self._metrics_dialog is None or self._metrics_ax is None:
+            return
+
+        self._metrics_ax.clear()
+        runs = list(self.run_history)
+        focus_index = self._get_focus_index()
+
+        if not runs:
+            self._metrics_ax.set_title("No runs recorded")
+            self._metrics_canvas.draw_idle()
+            return
+
+        chart_mode = self.metrics_chart_combo.currentText() if hasattr(self, "metrics_chart_combo") else "Dispersion (boxplot)"
+        metric_name = self.metrics_value_combo.currentText() if hasattr(self, "metrics_value_combo") else "Best distance"
+
+        if chart_mode == "Dispersion (boxplot)":
+            values = []
+            labels = []
+            for idx, run in enumerate(runs):
+                primary = run.get("primary", {})
+                value = None
+                if metric_name == "Best distance":
+                    distances = primary.get("best_distance") or []
+                    if distances:
+                        value = float(distances[-1])
+                elif metric_name == "Runtime":
+                    value = run.get("runtime_total")
+                elif metric_name == "Avg fitness":
+                    avg_vals = primary.get("avg_fitness") or []
+                    if avg_vals:
+                        value = float(avg_vals[-1])
+                elif metric_name == "Diversity":
+                    div_vals = primary.get("diversity") or []
+                    if div_vals:
+                        value = float(div_vals[-1])
+
+                if value is None:
+                    continue
+
+                values.append(value)
+                labels.append(f"Run {idx + 1}")
+
+            if not values:
+                self._metrics_ax.set_title("No data for selected metric")
+            else:
+                self._metrics_ax.boxplot(values, vert=True, showmeans=True)
+                self._metrics_ax.set_xticklabels(["All runs"])
+                self._metrics_ax.set_title(f"Dispersion: {metric_name}")
+            self._metrics_canvas.draw_idle()
+            return
+
+        # Convergence speed chart
+        colors = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple", "tab:brown", "tab:pink", "tab:gray"]
+        for idx, run in enumerate(runs):
+            distances = run.get("primary", {}).get("best_distance") or []
+            alpha = 1.0 if focus_index is None or idx == focus_index else 0.2
+            linewidth = 2.2 if focus_index is None or idx == focus_index else 1.2
+
+            if len(distances) >= 2:
+                self._metrics_ax.plot(
+                    list(range(2, len(distances) + 1)),
+                    [float(prev) - float(curr) for prev, curr in zip(distances[:-1], distances[1:])],
+                    color=colors[idx % len(colors)],
+                    linewidth=linewidth,
+                    alpha=alpha,
+                    label=f"Run {idx + 1}",
+                )
+
+            compare_distances = run.get("compare", {}).get("best_distance") or []
+            if len(compare_distances) >= 2:
+                self._metrics_ax.plot(
+                    list(range(2, len(compare_distances) + 1)),
+                    [float(prev) - float(curr) for prev, curr in zip(compare_distances[:-1], compare_distances[1:])],
+                    color=colors[idx % len(colors)],
+                    linewidth=linewidth,
+                    linestyle="--",
+                    alpha=alpha,
+                    label=f"Run {idx + 1} bat",
+                )
+
+        self._metrics_ax.set_title("Convergence speed (distance improvement per gen)")
+        self._metrics_ax.set_xlabel("Generation")
+        self._metrics_ax.set_ylabel("Improvement")
+        self._metrics_ax.grid(alpha=0.3)
+        if focus_index is not None or len(runs) <= 3:
+            self._metrics_ax.legend(loc="upper right")
+        self._metrics_canvas.draw_idle()
 
     def _is_solver_running(self) -> bool:
         return self._thread is not None and self._thread.isRunning()
@@ -854,11 +1125,23 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self.primary_distances = []
         self.compare_steps = []
         self.compare_distances = []
+        self._raw_primary_steps = []
+        self._raw_primary_distances = []
+        self._raw_primary_avg_fitness = []
+        self._raw_primary_diversity = []
+        self._raw_primary_avg_steps = []
+        self._raw_primary_div_steps = []
+        self._raw_compare_steps = []
+        self._raw_compare_distances = []
+        self._raw_compare_avg_fitness = []
+        self._raw_compare_diversity = []
+        self._raw_compare_avg_steps = []
+        self._raw_compare_div_steps = []
+        self._latest_primary_metrics = {"avg_fitness": None, "diversity": None}
         self.dropped_frame_count = 0
         self.rendered_primary_count = 0
         self.rendered_compare_count = 0
         self._waiting_for_frames = False
-        self.batch_trial_distances = []
 
     def _on_overlay_toggle(self, checked: bool) -> None:
         self._overlay_top_runs = bool(checked)
@@ -909,13 +1192,13 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self._comparison_enabled = bool(params.get("enable_bat_comparison", False))
         self._reset_live_state()
         self._draw_empty_route()
-        self._draw_empty_convergence()
+        self._draw_convergence()
         self._start_playback_timer()
 
         self._run_start_time = time.time()
 
         if self.current_cities is None:
-            self.current_cities = generate_cities(int(params["num_cities"]))
+            self.current_cities = self._generate_random_cities(int(params["num_cities"]))
 
         params["num_cities"] = int(self.current_cities.shape[0])
         params["cities"] = np.asarray(self.current_cities, dtype=float)
@@ -975,7 +1258,7 @@ class TSPControlPanel(QtWidgets.QMainWindow):
             return
 
         if self.current_cities is None:
-            self.current_cities = generate_cities(int(self.num_cities_spin.value()))
+            self.current_cities = self._generate_random_cities(int(self.num_cities_spin.value()))
 
         dist_matrix = compute_distance_matrix(self.current_cities)
         base_config = self._collect_params()
@@ -1152,6 +1435,9 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self.simpleai_epsilon_spin.setValue(app_config.SIMPLEAI_EPSILON)
         self.animation_interval_spin.setValue(max(DEFAULT_ANIMATION_INTERVAL_MS, app_config.ANIMATION_INTERVAL_MS))
         self.animation_buffer_limit_spin.setValue(0)
+        if hasattr(self, "city_seed_check"):
+            self.city_seed_check.setChecked(False)
+            self.city_seed_spin.setValue(42)
         self._sync_population_dependent_ranges()
 
     @QtCore.pyqtSlot(dict)
@@ -1165,12 +1451,13 @@ class TSPControlPanel(QtWidgets.QMainWindow):
                 self.current_cities = cities
             self._comparison_enabled = bool(payload.get("comparison_enabled", False))
             self._draw_empty_route()
-            self._draw_empty_convergence()
+            self._draw_convergence()
             return
 
         if payload.get("best_route") is None or payload.get("best_distance") is None:
             return
 
+        self._record_live_metrics(payload)
         self._enqueue_progress_frame(payload)
         self._update_run_stop_buttons()
 
@@ -1444,25 +1731,82 @@ class TSPControlPanel(QtWidgets.QMainWindow):
             runtime_note = f" | Solve time: {fmt_runtime(runtime_total)}"
             if runtime_primary is not None or runtime_bat is not None:
                 runtime_note += f" | primary: {fmt_runtime(runtime_primary)} | BAT: {fmt_runtime(runtime_bat)}"
+            metrics_note = ""
+            avg_fitness = self._latest_primary_metrics.get("avg_fitness")
+            diversity = self._latest_primary_metrics.get("diversity")
+            if avg_fitness is not None:
+                metrics_note += f" | avg fitness: {float(avg_fitness):.4f}"
+            else:
+                best_fitness = (1.0 / primary_best) if primary_best > 0 else None
+                if best_fitness is not None:
+                    metrics_note += f" | fitness: {best_fitness:.4f}"
+            if diversity is not None:
+                metrics_note += f" | diversity: {int(diversity)}"
             self.status_label.setText(
                 (
                     f"Completed | {backend}: {primary_best:.4f} | BAT: {bat_best:.4f} | "
-                    f"BAT-primary delta: {delta:.4f}{runtime_note} | Dropped: {self.dropped_frame_count}"
+                    f"BAT-primary delta: {delta:.4f}{runtime_note}{metrics_note} | Dropped: {self.dropped_frame_count}"
                 )
             )
         else:
             runtime_note = f" | Solve time: {fmt_runtime(runtime_total)}"
+            metrics_note = ""
+            avg_fitness = self._latest_primary_metrics.get("avg_fitness")
+            diversity = self._latest_primary_metrics.get("diversity")
+            if avg_fitness is not None:
+                metrics_note += f" | avg fitness: {float(avg_fitness):.4f}"
+            else:
+                best_fitness = (1.0 / primary_best) if primary_best > 0 else None
+                if best_fitness is not None:
+                    metrics_note += f" | fitness: {best_fitness:.4f}"
+            if diversity is not None:
+                metrics_note += f" | diversity: {int(diversity)}"
             self.status_label.setText(
                 (
                     f"Completed | Best distance: {primary_best:.4f} | "
                     f"Improvement: {primary_improvement:.4f} ({primary_improvement_pct:.2f}%) | "
-                    f"Rendered primary: {self.rendered_primary_count}{runtime_note} | Dropped: {self.dropped_frame_count}"
+                    f"Rendered primary: {self.rendered_primary_count}{runtime_note}{metrics_note} | Dropped: {self.dropped_frame_count}"
                 )
             )
 
         self._final_result_payload = None
         self._waiting_for_frames = False
         self._stop_playback_timer_if_idle()
+
+        try:
+            self._run_counter += 1
+            run_label = f"Run {self._run_counter}"
+            primary_history = list(primary_result.get("best_distance_history", []))
+            primary_steps = list(range(1, len(primary_history) + 1))
+            compare_history = []
+            if self._comparison_enabled and isinstance(comparison_result, dict):
+                compare_history = list(comparison_result.get("best_distance_history", []))
+
+            run_record = {
+                "label": run_label,
+                "primary": {
+                    "best_distance": primary_history,
+                    "steps": primary_steps,
+                    "avg_fitness": list(self._raw_primary_avg_fitness),
+                    "avg_fitness_steps": list(self._raw_primary_avg_steps),
+                    "diversity": list(self._raw_primary_diversity),
+                    "diversity_steps": list(self._raw_primary_div_steps),
+                },
+                "compare": {
+                    "best_distance": compare_history,
+                    "steps": list(range(1, len(compare_history) + 1)),
+                },
+                "runtime_total": runtime_total,
+                "runtime_primary": runtime_primary,
+                "runtime_bat": runtime_bat,
+            }
+
+            self.run_history.append(run_record)
+            self._refresh_run_focus_combo()
+            self._draw_convergence()
+            self._update_metrics_plot()
+        except Exception:
+            pass
 
         # Export experiment artifacts for GUI-run experiments
         try:
@@ -1625,39 +1969,100 @@ class TSPControlPanel(QtWidgets.QMainWindow):
     def _draw_convergence(self) -> None:
         self.conv_ax.clear()
 
-        primary_label = str(self._solver_params.get("backend", "primary")).lower()
-        if self.primary_distances:
-            self.conv_ax.plot(
-                self.primary_steps,
-                self.primary_distances,
-                color="tab:green",
-                linewidth=2,
-                label=f"{primary_label}",
-            )
-            self.conv_ax.scatter(
-                [self.primary_steps[-1]],
-                [self.primary_distances[-1]],
-                color="tab:green",
-                zorder=3,
-            )
+        metric = (
+            self.convergence_metric_combo.currentText()
+            if hasattr(self, "convergence_metric_combo")
+            else "Best distance"
+        )
+        focus_index = self._get_focus_index()
 
-        if self._comparison_enabled and self.compare_distances:
-            self.conv_ax.plot(
-                self.compare_steps,
-                self.compare_distances,
-                color="tab:purple",
-                linewidth=2,
-                linestyle="--",
-                label="bat",
-            )
-            self.conv_ax.scatter(
-                [self.compare_steps[-1]],
-                [self.compare_distances[-1]],
-                color="tab:purple",
-                zorder=3,
-            )
+        def series_for(section: Dict[str, Any], metric_name: str) -> Optional[Dict[str, List[float]]]:
+            if not section:
+                return None
 
-        if self.batch_convergence_mode != "off" and self.batch_trial_distances:
+            if metric_name == "Best distance":
+                values = section.get("best_distance") or []
+                steps = section.get("steps") or list(range(1, len(values) + 1))
+                return {"steps": steps, "values": values}
+
+            if metric_name == "Avg fitness":
+                values = section.get("avg_fitness") or []
+                steps = section.get("avg_fitness_steps") or list(range(1, len(values) + 1))
+                return {"steps": steps, "values": values}
+
+            if metric_name == "Diversity":
+                values = section.get("diversity") or []
+                steps = section.get("diversity_steps") or list(range(1, len(values) + 1))
+                return {"steps": steps, "values": values}
+
+            if metric_name == "Convergence speed":
+                distances = section.get("best_distance") or []
+                if len(distances) < 2:
+                    return None
+                speed = [float(prev) - float(curr) for prev, curr in zip(distances[:-1], distances[1:])]
+                steps = list(range(2, len(distances) + 1))
+                return {"steps": steps, "values": speed}
+
+            return None
+
+        runs = list(self.run_history)
+
+        current_primary = {
+            "best_distance": list(self._raw_primary_distances),
+            "steps": list(self._raw_primary_steps),
+            "avg_fitness": list(self._raw_primary_avg_fitness),
+            "avg_fitness_steps": list(self._raw_primary_avg_steps),
+            "diversity": list(self._raw_primary_diversity),
+            "diversity_steps": list(self._raw_primary_div_steps),
+        }
+        current_compare = {
+            "best_distance": list(self._raw_compare_distances),
+            "steps": list(self._raw_compare_steps),
+            "avg_fitness": list(self._raw_compare_avg_fitness),
+            "avg_fitness_steps": list(self._raw_compare_avg_steps),
+            "diversity": list(self._raw_compare_diversity),
+            "diversity_steps": list(self._raw_compare_div_steps),
+        }
+
+        has_current = bool(current_primary["best_distance"])
+        if has_current and focus_index is None:
+            runs.append({"label": "Current", "primary": current_primary, "compare": current_compare, "temp": True})
+
+        colors = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple", "tab:brown", "tab:pink", "tab:gray"]
+        show_legend = focus_index is not None or len(runs) <= 3
+
+        for idx, run in enumerate(runs):
+            if run.get("temp") and focus_index is not None:
+                continue
+
+            alpha = 1.0 if focus_index is None or idx == focus_index or run.get("temp") else 0.2
+            linewidth = 2.2 if focus_index is None or idx == focus_index or run.get("temp") else 1.2
+            color = colors[idx % len(colors)]
+
+            primary_series = series_for(run.get("primary", {}), metric)
+            if primary_series:
+                self.conv_ax.plot(
+                    primary_series["steps"],
+                    primary_series["values"],
+                    color=color,
+                    linewidth=linewidth,
+                    alpha=alpha,
+                    label=f"{run.get('label', f'Run {idx + 1}')} primary",
+                )
+
+            compare_series = series_for(run.get("compare", {}), metric)
+            if compare_series:
+                self.conv_ax.plot(
+                    compare_series["steps"],
+                    compare_series["values"],
+                    color=color,
+                    linewidth=linewidth,
+                    linestyle="--",
+                    alpha=alpha,
+                    label=f"{run.get('label', f'Run {idx + 1}')} bat",
+                )
+
+        if metric == "Best distance" and self.batch_convergence_mode != "off" and self.batch_trial_distances:
             trial_steps = list(range(1, len(self.batch_trial_distances) + 1))
             if self.batch_convergence_mode == "running":
                 batch_curve = []
@@ -1673,25 +2078,33 @@ class TSPControlPanel(QtWidgets.QMainWindow):
             self.conv_ax.plot(
                 trial_steps,
                 batch_curve,
-                color="tab:orange",
+                color="tab:olive",
                 linewidth=2,
                 marker="o",
                 label=label,
             )
-            self.conv_ax.scatter(
-                [trial_steps[-1]],
-                [batch_curve[-1]],
-                color="tab:orange",
-                zorder=3,
-            )
 
-        self.conv_ax.set_title("Best-so-far distance (comparison)")
+        title_map = {
+            "Best distance": "Best-so-far distance",
+            "Avg fitness": "Average fitness",
+            "Diversity": "Population diversity",
+            "Convergence speed": "Convergence speed",
+        }
+        ylabel_map = {
+            "Best distance": "Distance",
+            "Avg fitness": "Avg fitness",
+            "Diversity": "Diversity",
+            "Convergence speed": "Improvement",
+        }
+
+        self.conv_ax.set_title(title_map.get(metric, "Convergence"))
         self.conv_ax.set_xlabel("Step")
-        self.conv_ax.set_ylabel("Distance")
+        self.conv_ax.set_ylabel(ylabel_map.get(metric, "Value"))
         self.conv_ax.grid(alpha=0.3)
-        handles, labels = self.conv_ax.get_legend_handles_labels()
-        if handles and labels:
-            self.conv_ax.legend(loc="upper right")
+        if show_legend:
+            handles, labels = self.conv_ax.get_legend_handles_labels()
+            if handles and labels:
+                self.conv_ax.legend(loc="upper right")
         self.conv_canvas.draw_idle()
 
 
