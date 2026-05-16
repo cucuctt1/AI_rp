@@ -365,6 +365,7 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self.run_history: List[Dict[str, Any]] = []
         self._run_counter = 0
         self._focused_run_index: Optional[int] = None
+        self._show_convergence_overlay = True
         self._raw_primary_steps: List[int] = []
         self._raw_primary_distances: List[float] = []
         self._raw_primary_avg_fitness: List[float] = []
@@ -913,6 +914,7 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self._run_counter = 0
         self.batch_trial_distances = []
         self._focused_run_index = None
+        self._show_convergence_overlay = True
         self._refresh_run_focus_combo()
         self._draw_convergence()
         self._update_metrics_plot()
@@ -1187,6 +1189,7 @@ class TSPControlPanel(QtWidgets.QMainWindow):
             return
 
         self._stop_requested_ui = False
+        self._show_convergence_overlay = False
         params = self._collect_params()
         self._solver_params = dict(params)
         self._comparison_enabled = bool(params.get("enable_bat_comparison", False))
@@ -1484,10 +1487,12 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self._final_result_payload = None
         self._waiting_for_frames = False
         self._stop_requested_ui = False
+        self._show_convergence_overlay = True
         if self._animation_timer.isActive():
             self._animation_timer.stop()
         self.status_label.setText("Solver failed. See error details.")
         QtWidgets.QMessageBox.critical(self, "Solver Error", message)
+        self._draw_convergence()
         self._update_run_stop_buttons()
 
     @QtCore.pyqtSlot()
@@ -1496,9 +1501,11 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self._final_result_payload = None
         self._waiting_for_frames = False
         self._stop_requested_ui = False
+        self._show_convergence_overlay = True
         if self._animation_timer.isActive():
             self._animation_timer.stop()
         self.status_label.setText("Solver stopped by user.")
+        self._draw_convergence()
         self._update_run_stop_buttons()
 
     @QtCore.pyqtSlot()
@@ -1802,6 +1809,7 @@ class TSPControlPanel(QtWidgets.QMainWindow):
             }
 
             self.run_history.append(run_record)
+            self._show_convergence_overlay = True
             self._refresh_run_focus_combo()
             self._draw_convergence()
             self._update_metrics_plot()
@@ -2005,28 +2013,47 @@ class TSPControlPanel(QtWidgets.QMainWindow):
 
             return None
 
-        runs = list(self.run_history)
+        runs: List[Dict[str, Any]] = []
 
-        current_primary = {
-            "best_distance": list(self._raw_primary_distances),
-            "steps": list(self._raw_primary_steps),
-            "avg_fitness": list(self._raw_primary_avg_fitness),
-            "avg_fitness_steps": list(self._raw_primary_avg_steps),
-            "diversity": list(self._raw_primary_diversity),
-            "diversity_steps": list(self._raw_primary_div_steps),
-        }
-        current_compare = {
-            "best_distance": list(self._raw_compare_distances),
-            "steps": list(self._raw_compare_steps),
-            "avg_fitness": list(self._raw_compare_avg_fitness),
-            "avg_fitness_steps": list(self._raw_compare_avg_steps),
-            "diversity": list(self._raw_compare_diversity),
-            "diversity_steps": list(self._raw_compare_div_steps),
-        }
+        def slice_series(values: List[float], steps: List[int], count: int) -> Dict[str, List[float]]:
+            if not values:
+                return {"values": [], "steps": []}
+            limit = min(len(values), max(0, int(count)))
+            if limit <= 0:
+                return {"values": [], "steps": []}
+            if steps:
+                return {"values": list(values[:limit]), "steps": list(steps[:limit])}
+            return {"values": list(values[:limit]), "steps": list(range(1, limit + 1))}
 
-        has_current = bool(current_primary["best_distance"])
-        if has_current and focus_index is None:
-            runs.append({"label": "Current", "primary": current_primary, "compare": current_compare, "temp": True})
+        if self._show_convergence_overlay:
+            runs = list(self.run_history)
+        else:
+            primary_slice = slice_series(self._raw_primary_distances, self._raw_primary_steps, self.rendered_primary_count)
+            compare_slice = slice_series(self._raw_compare_distances, self._raw_compare_steps, self.rendered_compare_count)
+            avg_slice = slice_series(self._raw_primary_avg_fitness, self._raw_primary_avg_steps, self.rendered_primary_count)
+            div_slice = slice_series(self._raw_primary_diversity, self._raw_primary_div_steps, self.rendered_primary_count)
+            avg_compare_slice = slice_series(self._raw_compare_avg_fitness, self._raw_compare_avg_steps, self.rendered_compare_count)
+            div_compare_slice = slice_series(self._raw_compare_diversity, self._raw_compare_div_steps, self.rendered_compare_count)
+
+            current_primary = {
+                "best_distance": primary_slice["values"],
+                "steps": primary_slice["steps"],
+                "avg_fitness": avg_slice["values"],
+                "avg_fitness_steps": avg_slice["steps"],
+                "diversity": div_slice["values"],
+                "diversity_steps": div_slice["steps"],
+            }
+            current_compare = {
+                "best_distance": compare_slice["values"],
+                "steps": compare_slice["steps"],
+                "avg_fitness": avg_compare_slice["values"],
+                "avg_fitness_steps": avg_compare_slice["steps"],
+                "diversity": div_compare_slice["values"],
+                "diversity_steps": div_compare_slice["steps"],
+            }
+
+            if current_primary["best_distance"]:
+                runs.append({"label": "Current", "primary": current_primary, "compare": current_compare, "temp": True})
 
         colors = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple", "tab:brown", "tab:pink", "tab:gray"]
         show_legend = focus_index is not None or len(runs) <= 3
@@ -2062,7 +2089,12 @@ class TSPControlPanel(QtWidgets.QMainWindow):
                     label=f"{run.get('label', f'Run {idx + 1}')} bat",
                 )
 
-        if metric == "Best distance" and self.batch_convergence_mode != "off" and self.batch_trial_distances:
+        if (
+            self._show_convergence_overlay
+            and metric == "Best distance"
+            and self.batch_convergence_mode != "off"
+            and self.batch_trial_distances
+        ):
             trial_steps = list(range(1, len(self.batch_trial_distances) + 1))
             if self.batch_convergence_mode == "running":
                 batch_curve = []
