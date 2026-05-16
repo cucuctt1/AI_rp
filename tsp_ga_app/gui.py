@@ -7,7 +7,7 @@ import sys
 import threading
 import time
 import traceback
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional, Set
 
 import numpy as np
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -382,6 +382,8 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self._metrics_dialog: Optional[QtWidgets.QDialog] = None
         self._metrics_canvas: Optional[FigureCanvas] = None
         self._metrics_ax = None
+        self._metrics_selected_runs: Optional[Set[int]] = None
+        self._metrics_run_list: Optional[QtWidgets.QListWidget] = None
 
         self._animation_timer = QtCore.QTimer(self)
         self._animation_timer.setTimerType(QtCore.Qt.PreciseTimer)
@@ -444,8 +446,8 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         general_form = QtWidgets.QFormLayout(general_group)
 
         self.backend_combo = QtWidgets.QComboBox()
-        self.backend_combo.addItems(["custom", "simpleai"])
-        self.backend_combo.setCurrentText(app_config.SOLVER_BACKEND)
+        self.backend_combo.addItems(["custom"])
+        self.backend_combo.setCurrentText("custom")
 
         self.num_cities_spin = QtWidgets.QSpinBox()
         self.num_cities_spin.setRange(5, 500)
@@ -505,53 +507,6 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         general_form.addRow("Tournament size", self.tournament_spin)
         general_form.addRow(self.seed_check, self.seed_spin)
         general_form.addRow(self.enable_bat_compare_check)
-
-        simpleai_group = QtWidgets.QGroupBox("simpleAI tuning")
-        simpleai_form = QtWidgets.QFormLayout(simpleai_group)
-
-        self.simpleai_restarts_spin = QtWidgets.QSpinBox()
-        self.simpleai_restarts_spin.setRange(1, 200)
-        self.simpleai_restarts_spin.setValue(app_config.SIMPLEAI_RESTARTS)
-
-        self.simpleai_enable_2opt_check = QtWidgets.QCheckBox()
-        self.simpleai_enable_2opt_check.setChecked(app_config.SIMPLEAI_ENABLE_2OPT)
-
-        self.simpleai_2opt_passes_spin = QtWidgets.QSpinBox()
-        self.simpleai_2opt_passes_spin.setRange(1, 1000)
-        self.simpleai_2opt_passes_spin.setValue(app_config.SIMPLEAI_2OPT_MAX_PASSES)
-
-        self.simpleai_fitness_power_spin = QtWidgets.QDoubleSpinBox()
-        self.simpleai_fitness_power_spin.setRange(0.5, 5.0)
-        self.simpleai_fitness_power_spin.setSingleStep(0.1)
-        self.simpleai_fitness_power_spin.setDecimals(3)
-        self.simpleai_fitness_power_spin.setValue(app_config.SIMPLEAI_FITNESS_POWER)
-
-        self.simpleai_use_native_check = QtWidgets.QCheckBox()
-        self.simpleai_use_native_check.setChecked(app_config.SIMPLEAI_USE_NATIVE_GENETIC)
-
-        self.simpleai_elitism_check = QtWidgets.QCheckBox()
-        self.simpleai_elitism_check.setChecked(app_config.SIMPLEAI_ENABLE_ELITISM)
-
-        self.simpleai_diversity_spin = QtWidgets.QDoubleSpinBox()
-        self.simpleai_diversity_spin.setRange(0.0, 1.0)
-        self.simpleai_diversity_spin.setSingleStep(0.01)
-        self.simpleai_diversity_spin.setDecimals(3)
-        self.simpleai_diversity_spin.setValue(app_config.SIMPLEAI_DIVERSITY_RATE)
-
-        self.simpleai_epsilon_spin = QtWidgets.QDoubleSpinBox()
-        self.simpleai_epsilon_spin.setRange(1e-12, 1.0)
-        self.simpleai_epsilon_spin.setDecimals(12)
-        self.simpleai_epsilon_spin.setSingleStep(1e-4)
-        self.simpleai_epsilon_spin.setValue(app_config.SIMPLEAI_EPSILON)
-
-        simpleai_form.addRow("Restarts", self.simpleai_restarts_spin)
-        simpleai_form.addRow("Enable 2-opt", self.simpleai_enable_2opt_check)
-        simpleai_form.addRow("2-opt max passes", self.simpleai_2opt_passes_spin)
-        simpleai_form.addRow("Fitness power", self.simpleai_fitness_power_spin)
-        simpleai_form.addRow("Use native simpleAI", self.simpleai_use_native_check)
-        simpleai_form.addRow("Enable elitism", self.simpleai_elitism_check)
-        simpleai_form.addRow("Diversity rate", self.simpleai_diversity_spin)
-        simpleai_form.addRow("Fitness epsilon", self.simpleai_epsilon_spin)
 
         playback_group = QtWidgets.QGroupBox("Live playback")
         playback_form = QtWidgets.QFormLayout(playback_group)
@@ -665,7 +620,6 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self.reset_button.clicked.connect(self._reset_fields)
 
         vbox.addWidget(general_group)
-        vbox.addWidget(simpleai_group)
         vbox.addWidget(playback_group)
         vbox.addWidget(convergence_group)
         vbox.addWidget(data_group)
@@ -915,7 +869,9 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self.batch_trial_distances = []
         self._focused_run_index = None
         self._show_convergence_overlay = True
+        self._metrics_selected_runs = None
         self._refresh_run_focus_combo()
+        self._sync_metrics_run_list()
         self._draw_convergence()
         self._update_metrics_plot()
 
@@ -981,6 +937,24 @@ class TSPControlPanel(QtWidgets.QMainWindow):
 
             layout.addLayout(controls)
 
+            selection_layout = QtWidgets.QHBoxLayout()
+            self._metrics_run_list = QtWidgets.QListWidget()
+            self._metrics_run_list.setMinimumWidth(180)
+            self._metrics_run_list.itemChanged.connect(self._on_metrics_run_selection_changed)
+
+            selection_buttons = QtWidgets.QVBoxLayout()
+            self.metrics_select_all_button = QtWidgets.QPushButton("Select all")
+            self.metrics_deselect_all_button = QtWidgets.QPushButton("Deselect all")
+            self.metrics_select_all_button.clicked.connect(self._select_all_metrics_runs)
+            self.metrics_deselect_all_button.clicked.connect(self._deselect_all_metrics_runs)
+            selection_buttons.addWidget(self.metrics_select_all_button)
+            selection_buttons.addWidget(self.metrics_deselect_all_button)
+            selection_buttons.addStretch(1)
+
+            selection_layout.addWidget(self._metrics_run_list)
+            selection_layout.addLayout(selection_buttons)
+            layout.addLayout(selection_layout)
+
             figure = Figure(figsize=(8, 4.5), tight_layout=True)
             self._metrics_canvas = FigureCanvas(figure)
             self._metrics_ax = figure.add_subplot(111)
@@ -988,10 +962,72 @@ class TSPControlPanel(QtWidgets.QMainWindow):
 
             self._metrics_dialog = dialog
 
+        self._sync_metrics_run_list()
         self._update_metrics_plot()
         self._metrics_dialog.show()
         self._metrics_dialog.raise_()
         self._metrics_dialog.activateWindow()
+
+    def _sync_metrics_run_list(self) -> None:
+        if self._metrics_run_list is None:
+            return
+
+        runs = list(self.run_history)
+        if self._metrics_selected_runs is None:
+            selected = set(range(len(runs)))
+        else:
+            selected = set(self._metrics_selected_runs)
+
+        self._metrics_run_list.blockSignals(True)
+        self._metrics_run_list.clear()
+        for idx, run in enumerate(runs):
+            label = run.get("label", f"Run {idx + 1}")
+            item = QtWidgets.QListWidgetItem(label)
+            item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
+            item.setCheckState(QtCore.Qt.Checked if idx in selected else QtCore.Qt.Unchecked)
+            item.setData(QtCore.Qt.UserRole, idx)
+            self._metrics_run_list.addItem(item)
+        self._metrics_run_list.blockSignals(False)
+
+        if self._metrics_selected_runs is None:
+            self._metrics_selected_runs = selected
+
+    def _on_metrics_run_selection_changed(self, _item: QtWidgets.QListWidgetItem) -> None:
+        if self._metrics_run_list is None:
+            return
+
+        selected: Set[int] = set()
+        for idx in range(self._metrics_run_list.count()):
+            item = self._metrics_run_list.item(idx)
+            if item.checkState() == QtCore.Qt.Checked:
+                selected.add(int(item.data(QtCore.Qt.UserRole)))
+
+        self._metrics_selected_runs = selected
+        self._update_metrics_plot()
+
+    def _select_all_metrics_runs(self) -> None:
+        if self._metrics_run_list is None:
+            return
+
+        self._metrics_run_list.blockSignals(True)
+        for idx in range(self._metrics_run_list.count()):
+            self._metrics_run_list.item(idx).setCheckState(QtCore.Qt.Checked)
+        self._metrics_run_list.blockSignals(False)
+
+        self._metrics_selected_runs = set(range(self._metrics_run_list.count()))
+        self._update_metrics_plot()
+
+    def _deselect_all_metrics_runs(self) -> None:
+        if self._metrics_run_list is None:
+            return
+
+        self._metrics_run_list.blockSignals(True)
+        for idx in range(self._metrics_run_list.count()):
+            self._metrics_run_list.item(idx).setCheckState(QtCore.Qt.Unchecked)
+        self._metrics_run_list.blockSignals(False)
+
+        self._metrics_selected_runs = set()
+        self._update_metrics_plot()
 
     def _update_metrics_plot(self) -> None:
         if self._metrics_dialog is None or self._metrics_ax is None:
@@ -1000,9 +1036,23 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self._metrics_ax.clear()
         runs = list(self.run_history)
         focus_index = self._get_focus_index()
+        selected_indices = (
+            set(self._metrics_selected_runs)
+            if self._metrics_selected_runs is not None
+            else set(range(len(runs)))
+        )
+
+        selected_runs = [(idx, run) for idx, run in enumerate(runs) if idx in selected_indices]
+        if focus_index is not None and focus_index not in selected_indices:
+            focus_index = None
 
         if not runs:
             self._metrics_ax.set_title("No runs recorded")
+            self._metrics_canvas.draw_idle()
+            return
+
+        if not selected_runs:
+            self._metrics_ax.set_title("No runs selected")
             self._metrics_canvas.draw_idle()
             return
 
@@ -1012,7 +1062,7 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         if chart_mode == "Dispersion (boxplot)":
             values = []
             labels = []
-            for idx, run in enumerate(runs):
+            for idx, run in selected_runs:
                 primary = run.get("primary", {})
                 value = None
                 if metric_name == "Best distance":
@@ -1047,7 +1097,7 @@ class TSPControlPanel(QtWidgets.QMainWindow):
 
         # Convergence speed chart
         colors = ["tab:blue", "tab:orange", "tab:green", "tab:red", "tab:purple", "tab:brown", "tab:pink", "tab:gray"]
-        for idx, run in enumerate(runs):
+        for idx, run in selected_runs:
             distances = run.get("primary", {}).get("best_distance") or []
             alpha = 1.0 if focus_index is None or idx == focus_index else 0.2
             linewidth = 2.2 if focus_index is None or idx == focus_index else 1.2
@@ -1173,14 +1223,6 @@ class TSPControlPanel(QtWidgets.QMainWindow):
             "elite_size": elite_size,
             "tournament_size": tournament_size,
             "seed": seed_value,
-            "simpleai_restarts": int(self.simpleai_restarts_spin.value()),
-            "simpleai_enable_2opt": bool(self.simpleai_enable_2opt_check.isChecked()),
-            "simpleai_2opt_max_passes": int(self.simpleai_2opt_passes_spin.value()),
-            "simpleai_fitness_power": float(self.simpleai_fitness_power_spin.value()),
-            "simpleai_use_native": bool(self.simpleai_use_native_check.isChecked()),
-            "simpleai_enable_elitism": bool(self.simpleai_elitism_check.isChecked()),
-            "simpleai_diversity_rate": float(self.simpleai_diversity_spin.value()),
-            "simpleai_epsilon": float(self.simpleai_epsilon_spin.value()),
         }
 
     def _start_solver(self) -> None:
@@ -1427,15 +1469,6 @@ class TSPControlPanel(QtWidgets.QMainWindow):
 
         self.seed_check.setChecked(app_config.RANDOM_SEED is not None)
         self.seed_spin.setValue(app_config.RANDOM_SEED if app_config.RANDOM_SEED is not None else 0)
-
-        self.simpleai_restarts_spin.setValue(app_config.SIMPLEAI_RESTARTS)
-        self.simpleai_enable_2opt_check.setChecked(app_config.SIMPLEAI_ENABLE_2OPT)
-        self.simpleai_2opt_passes_spin.setValue(app_config.SIMPLEAI_2OPT_MAX_PASSES)
-        self.simpleai_fitness_power_spin.setValue(app_config.SIMPLEAI_FITNESS_POWER)
-        self.simpleai_use_native_check.setChecked(app_config.SIMPLEAI_USE_NATIVE_GENETIC)
-        self.simpleai_elitism_check.setChecked(app_config.SIMPLEAI_ENABLE_ELITISM)
-        self.simpleai_diversity_spin.setValue(app_config.SIMPLEAI_DIVERSITY_RATE)
-        self.simpleai_epsilon_spin.setValue(app_config.SIMPLEAI_EPSILON)
         self.animation_interval_spin.setValue(max(DEFAULT_ANIMATION_INTERVAL_MS, app_config.ANIMATION_INTERVAL_MS))
         self.animation_buffer_limit_spin.setValue(0)
         if hasattr(self, "city_seed_check"):
@@ -1811,6 +1844,7 @@ class TSPControlPanel(QtWidgets.QMainWindow):
             self.run_history.append(run_record)
             self._show_convergence_overlay = True
             self._refresh_run_focus_combo()
+            self._sync_metrics_run_list()
             self._draw_convergence()
             self._update_metrics_plot()
         except Exception:
