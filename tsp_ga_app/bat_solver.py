@@ -30,6 +30,8 @@ def _emit_progress(
     total_generations: int,
     best_route: Sequence[int],
     best_distance: float,
+    avg_fitness: Optional[float] = None,
+    diversity: Optional[int] = None,
 ) -> None:
     if progress_callback is None:
         return
@@ -43,6 +45,8 @@ def _emit_progress(
         "restart_count": 1,
         "best_route": list(best_route),
         "best_distance": float(best_distance),
+        "avg_fitness": avg_fitness,
+        "diversity": diversity,
     }
     try:
         progress_callback(payload)
@@ -137,6 +141,14 @@ def bat_algorithm_tsp(
     tournament_size: int = 0,
     progress_callback: ProgressCallback = None,
     rng: Optional[random.Random] = None,
+    frequency_min: float = BAT_FREQUENCY_MIN,
+    frequency_max: float = BAT_FREQUENCY_MAX,
+    initial_loudness: float = BAT_INITIAL_LOUDNESS,
+    initial_pulse_rate: float = BAT_INITIAL_PULSE_RATE,
+    alpha: float = BAT_ALPHA,
+    gamma: float = BAT_GAMMA,
+    max_guided_moves: int = BAT_MAX_GUIDED_MOVES,
+    local_walk_segment: int = BAT_LOCAL_WALK_SEGMENT,
 ) -> Tuple[List[int], float, List[float], List[List[int]], float]:
     """Run a bat-inspired metaheuristic for TSP (permutation-safe variant)."""
     _ = cities
@@ -168,24 +180,36 @@ def bat_algorithm_tsp(
     best_route = list(population[best_index])
     best_distance = float(distances[best_index])
 
+    frequency_min = float(frequency_min)
+    frequency_max = float(frequency_max)
+    if frequency_max < frequency_min:
+        frequency_min, frequency_max = frequency_max, frequency_min
+
+    initial_loudness = max(0.0, float(initial_loudness))
+    initial_pulse_rate = max(0.0, min(1.0, float(initial_pulse_rate)))
+    alpha = max(0.0, min(1.0, float(alpha)))
+    gamma = max(0.0, float(gamma))
+    max_guided_moves = max(1, int(max_guided_moves))
+    local_walk_segment = max(2, int(local_walk_segment))
+
     velocities = [0.0 for _ in range(pop_size)]
-    loudness = [BAT_INITIAL_LOUDNESS for _ in range(pop_size)]
-    pulse_rates = [BAT_INITIAL_PULSE_RATE for _ in range(pop_size)]
+    loudness = [initial_loudness for _ in range(pop_size)]
+    pulse_rates = [initial_pulse_rate for _ in range(pop_size)]
 
     best_distance_history: List[float] = []
     best_route_history: List[List[int]] = []
 
     for generation_idx in range(generations):
         for bat_idx in range(pop_size):
-            frequency = BAT_FREQUENCY_MIN + (BAT_FREQUENCY_MAX - BAT_FREQUENCY_MIN) * rng.random()
+            frequency = frequency_min + (frequency_max - frequency_min) * rng.random()
             difference = _hamming_distance(population[bat_idx], best_route)
             velocities[bat_idx] += frequency * difference
 
-            move_count = int(round(min(max(1.0, velocities[bat_idx]), float(BAT_MAX_GUIDED_MOVES))))
+            move_count = int(round(min(max(1.0, velocities[bat_idx]), float(max_guided_moves))))
             candidate = _guided_move_towards_best(population[bat_idx], best_route, move_count, rng)
 
             if rng.random() > pulse_rates[bat_idx]:
-                candidate = _local_walk_near_best(best_route, BAT_LOCAL_WALK_SEGMENT, rng)
+                candidate = _local_walk_near_best(best_route, local_walk_segment, rng)
 
             if rng.random() < mutation_rate:
                 candidate = _random_inversion(candidate, rng)
@@ -206,12 +230,16 @@ def bat_algorithm_tsp(
                 best_route = list(candidate)
 
             if accepted:
-                loudness[bat_idx] = max(0.05, loudness[bat_idx] * BAT_ALPHA)
-                pulse_update = 1.0 - math.exp(-BAT_GAMMA * (generation_idx + 1))
-                pulse_rates[bat_idx] = min(1.0, BAT_INITIAL_PULSE_RATE + pulse_update * 0.5)
+                loudness[bat_idx] = max(0.05, loudness[bat_idx] * alpha)
+                pulse_update = 1.0 - math.exp(-gamma * (generation_idx + 1))
+                pulse_rates[bat_idx] = min(1.0, initial_pulse_rate + pulse_update * 0.5)
 
         best_distance_history.append(best_distance)
         best_route_history.append(list(best_route))
+
+        fitnesses = [1.0 / d if d and d > 0 else 0.0 for d in distances]
+        avg_fitness = float(np.mean(fitnesses)) if fitnesses else 0.0
+        diversity = int(len({tuple(route) for route in population}))
 
         _emit_progress(
             progress_callback=progress_callback,
@@ -219,6 +247,8 @@ def bat_algorithm_tsp(
             total_generations=generations,
             best_route=best_route,
             best_distance=best_distance,
+            avg_fitness=avg_fitness,
+            diversity=diversity,
         )
         if progress_callback is not None:
             time.sleep(0)

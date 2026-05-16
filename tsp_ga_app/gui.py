@@ -96,6 +96,14 @@ class SolverWorker(QtCore.QObject):
                             mutation_rate=float(self.params["mutation_rate"]),
                             progress_callback=self._build_progress_callback(source="bat", series_name="bat"),
                             rng=bat_rng,
+                            frequency_min=float(self.params.get("bat_frequency_min", 0.0)),
+                            frequency_max=float(self.params.get("bat_frequency_max", 2.0)),
+                            initial_loudness=float(self.params.get("bat_initial_loudness", 0.9)),
+                            initial_pulse_rate=float(self.params.get("bat_initial_pulse", 0.15)),
+                            alpha=float(self.params.get("bat_alpha", 0.96)),
+                            gamma=float(self.params.get("bat_gamma", 0.9)),
+                            max_guided_moves=int(self.params.get("bat_max_guided_moves", 8)),
+                            local_walk_segment=int(self.params.get("bat_local_walk_segment", 5)),
                         )
 
                         bat_state["result"] = self._pack_solver_result(
@@ -508,6 +516,59 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         general_form.addRow(self.seed_check, self.seed_spin)
         general_form.addRow(self.enable_bat_compare_check)
 
+        bat_group = QtWidgets.QGroupBox("BAT tuning")
+        bat_form = QtWidgets.QFormLayout(bat_group)
+
+        self.bat_freq_min_spin = QtWidgets.QDoubleSpinBox()
+        self.bat_freq_min_spin.setRange(0.0, 10.0)
+        self.bat_freq_min_spin.setDecimals(3)
+        self.bat_freq_min_spin.setValue(0.0)
+
+        self.bat_freq_max_spin = QtWidgets.QDoubleSpinBox()
+        self.bat_freq_max_spin.setRange(0.0, 10.0)
+        self.bat_freq_max_spin.setDecimals(3)
+        self.bat_freq_max_spin.setValue(2.0)
+
+        self.bat_loudness_spin = QtWidgets.QDoubleSpinBox()
+        self.bat_loudness_spin.setRange(0.0, 1.0)
+        self.bat_loudness_spin.setDecimals(3)
+        self.bat_loudness_spin.setValue(0.9)
+
+        self.bat_pulse_spin = QtWidgets.QDoubleSpinBox()
+        self.bat_pulse_spin.setRange(0.0, 1.0)
+        self.bat_pulse_spin.setDecimals(3)
+        self.bat_pulse_spin.setValue(0.15)
+
+        self.bat_alpha_spin = QtWidgets.QDoubleSpinBox()
+        self.bat_alpha_spin.setRange(0.0, 1.0)
+        self.bat_alpha_spin.setDecimals(3)
+        self.bat_alpha_spin.setValue(0.96)
+
+        self.bat_gamma_spin = QtWidgets.QDoubleSpinBox()
+        self.bat_gamma_spin.setRange(0.0, 5.0)
+        self.bat_gamma_spin.setDecimals(3)
+        self.bat_gamma_spin.setValue(0.9)
+
+        self.bat_guided_moves_spin = QtWidgets.QSpinBox()
+        self.bat_guided_moves_spin.setRange(1, 100)
+        self.bat_guided_moves_spin.setValue(8)
+
+        self.bat_local_walk_spin = QtWidgets.QSpinBox()
+        self.bat_local_walk_spin.setRange(2, 100)
+        self.bat_local_walk_spin.setValue(5)
+
+        bat_form.addRow("Freq min", self.bat_freq_min_spin)
+        bat_form.addRow("Freq max", self.bat_freq_max_spin)
+        bat_form.addRow("Initial loudness", self.bat_loudness_spin)
+        bat_form.addRow("Initial pulse", self.bat_pulse_spin)
+        bat_form.addRow("Alpha", self.bat_alpha_spin)
+        bat_form.addRow("Gamma", self.bat_gamma_spin)
+        bat_form.addRow("Max guided moves", self.bat_guided_moves_spin)
+        bat_form.addRow("Local walk segment", self.bat_local_walk_spin)
+
+        bat_group.setEnabled(self.enable_bat_compare_check.isChecked())
+        self.enable_bat_compare_check.toggled.connect(bat_group.setEnabled)
+
         playback_group = QtWidgets.QGroupBox("Live playback")
         playback_form = QtWidgets.QFormLayout(playback_group)
 
@@ -620,6 +681,7 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self.reset_button.clicked.connect(self._reset_fields)
 
         vbox.addWidget(general_group)
+        vbox.addWidget(bat_group)
         vbox.addWidget(playback_group)
         vbox.addWidget(convergence_group)
         vbox.addWidget(data_group)
@@ -1084,14 +1146,22 @@ class TSPControlPanel(QtWidgets.QMainWindow):
                 if value is not None:
                     custom_values.append(value)
 
-                if metric_name in {"Best distance", "Runtime"}:
+                if metric_name in {"Best distance", "Runtime", "Avg fitness", "Diversity"}:
                     bat_value = None
                     if metric_name == "Best distance":
                         compare_distances = run.get("compare", {}).get("best_distance") or []
                         if compare_distances:
                             bat_value = float(compare_distances[-1])
-                    else:
+                    elif metric_name == "Runtime":
                         bat_value = run.get("runtime_bat")
+                    elif metric_name == "Avg fitness":
+                        bat_avg = run.get("compare", {}).get("avg_fitness") or []
+                        if bat_avg:
+                            bat_value = float(bat_avg[-1])
+                    else:
+                        bat_div = run.get("compare", {}).get("diversity") or []
+                        if bat_div:
+                            bat_value = float(bat_div[-1])
 
                     if bat_value is not None:
                         bat_values.append(float(bat_value))
@@ -1242,6 +1312,14 @@ class TSPControlPanel(QtWidgets.QMainWindow):
             "elite_size": elite_size,
             "tournament_size": tournament_size,
             "seed": seed_value,
+            "bat_frequency_min": float(self.bat_freq_min_spin.value()),
+            "bat_frequency_max": float(self.bat_freq_max_spin.value()),
+            "bat_initial_loudness": float(self.bat_loudness_spin.value()),
+            "bat_initial_pulse": float(self.bat_pulse_spin.value()),
+            "bat_alpha": float(self.bat_alpha_spin.value()),
+            "bat_gamma": float(self.bat_gamma_spin.value()),
+            "bat_max_guided_moves": int(self.bat_guided_moves_spin.value()),
+            "bat_local_walk_segment": int(self.bat_local_walk_spin.value()),
         }
 
     def _start_solver(self) -> None:
@@ -1490,6 +1568,15 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self.seed_spin.setValue(app_config.RANDOM_SEED if app_config.RANDOM_SEED is not None else 0)
         self.animation_interval_spin.setValue(max(DEFAULT_ANIMATION_INTERVAL_MS, app_config.ANIMATION_INTERVAL_MS))
         self.animation_buffer_limit_spin.setValue(0)
+        if hasattr(self, "bat_freq_min_spin"):
+            self.bat_freq_min_spin.setValue(0.0)
+            self.bat_freq_max_spin.setValue(2.0)
+            self.bat_loudness_spin.setValue(0.9)
+            self.bat_pulse_spin.setValue(0.15)
+            self.bat_alpha_spin.setValue(0.96)
+            self.bat_gamma_spin.setValue(0.9)
+            self.bat_guided_moves_spin.setValue(8)
+            self.bat_local_walk_spin.setValue(5)
         if hasattr(self, "city_seed_check"):
             self.city_seed_check.setChecked(False)
             self.city_seed_spin.setValue(42)
@@ -1854,6 +1941,10 @@ class TSPControlPanel(QtWidgets.QMainWindow):
                 "compare": {
                     "best_distance": compare_history,
                     "steps": list(range(1, len(compare_history) + 1)),
+                    "avg_fitness": list(self._raw_compare_avg_fitness),
+                    "avg_fitness_steps": list(self._raw_compare_avg_steps),
+                    "diversity": list(self._raw_compare_diversity),
+                    "diversity_steps": list(self._raw_compare_div_steps),
                 },
                 "runtime_total": runtime_total,
                 "runtime_primary": runtime_primary,
