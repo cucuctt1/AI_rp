@@ -1060,8 +1060,9 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         metric_name = self.metrics_value_combo.currentText() if hasattr(self, "metrics_value_combo") else "Best distance"
 
         if chart_mode == "Dispersion (boxplot)":
-            values = []
-            labels = []
+            custom_values: List[float] = []
+            bat_values: List[float] = []
+
             for idx, run in selected_runs:
                 primary = run.get("primary", {})
                 value = None
@@ -1080,17 +1081,35 @@ class TSPControlPanel(QtWidgets.QMainWindow):
                     if div_vals:
                         value = float(div_vals[-1])
 
-                if value is None:
-                    continue
+                if value is not None:
+                    custom_values.append(value)
 
-                values.append(value)
-                labels.append(f"Run {idx + 1}")
+                if metric_name in {"Best distance", "Runtime"}:
+                    bat_value = None
+                    if metric_name == "Best distance":
+                        compare_distances = run.get("compare", {}).get("best_distance") or []
+                        if compare_distances:
+                            bat_value = float(compare_distances[-1])
+                    else:
+                        bat_value = run.get("runtime_bat")
 
-            if not values:
+                    if bat_value is not None:
+                        bat_values.append(float(bat_value))
+
+            if not custom_values and not bat_values:
                 self._metrics_ax.set_title("No data for selected metric")
             else:
-                self._metrics_ax.boxplot(values, vert=True, showmeans=True)
-                self._metrics_ax.set_xticklabels(["All runs"])
+                datasets: List[List[float]] = []
+                labels: List[str] = []
+                if custom_values:
+                    datasets.append(custom_values)
+                    labels.append("Custom")
+                if bat_values:
+                    datasets.append(bat_values)
+                    labels.append("BAT")
+
+                self._metrics_ax.boxplot(datasets, vert=True, showmeans=True)
+                self._metrics_ax.set_xticklabels(labels)
                 self._metrics_ax.set_title(f"Dispersion: {metric_name}")
             self._metrics_canvas.draw_idle()
             return
