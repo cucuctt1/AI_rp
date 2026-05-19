@@ -6,7 +6,7 @@ Tài liệu này mô tả chi tiết cách sử dụng, cấu trúc dự án, c�
 
 Dự án giải bài toán Travelling Salesman Problem (TSP) bằng GA với các điểm nổi bật:
 
-- Hai backend GA: `custom` và `simpleai`.
+- Một backend GA: `custom`.
 - Chế độ so sánh BAT (BAT comparison) chạy song song với GA.
 - GUI PyQt5 hiển thị route, convergence, overlay nhiều lần chạy.
 - Hỗ trợ seed cho **thuật toán** và **thành phố** (city seed).
