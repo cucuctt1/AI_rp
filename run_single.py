@@ -1,9 +1,5 @@
 import numpy as np
-
-# A small utility to generate cities internally so we don't rely on legacy code
-def compute_distance_matrix(cities: np.ndarray) -> np.ndarray:
-    deltas = cities[:, np.newaxis, :] - cities[np.newaxis, :, :]
-    return np.sqrt(np.sum(deltas * deltas, axis=2))
+from tsp_ga_app.problem import compute_distance_matrix
 
 if __name__ == "__main__":
     from core.config import DEFAULT_CONFIG
@@ -19,4 +15,13 @@ if __name__ == "__main__":
     config['population_size'] = 100
     config['local_search_freq'] = 10  # Apply 2-opt every 10 generations
     
-    run_single_experiment("single_test_ox_swap", config, dist_matrix, cities=cities, seed=99)
+    run_single_experiment(
+        "single_test_ox_swap",
+        config,
+        dist_matrix,
+        cities=cities,
+        seed=99,
+        dataset_name="generated_random_50_seed_42",
+        coordinate_source_or_seed="numpy.random.seed(42); uniform(0,100)",
+        known_optimum="N/A",
+    )

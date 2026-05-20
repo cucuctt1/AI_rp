@@ -3,6 +3,8 @@ import json
 import csv
 from datetime import datetime
 
+from utils.results_reporting import to_json_ready
+
 class Exporter:
     def __init__(self, output_root="outputs"):
         self.output_root = output_root
@@ -19,7 +21,7 @@ class Exporter:
     def save_config(self, folder_path: str, config: dict):
         file_path = os.path.join(folder_path, "config.json")
         with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(config, f, indent=4)
+            json.dump(to_json_ready(config), f, indent=4)
 
     def save_metrics(self, folder_path: str, metrics: list):
         """
@@ -88,7 +90,14 @@ class Exporter:
         fieldnames = [
             "experiment_id", "crossover_type", "mutation_type", 
             "mutation_rate", "selection_type", "population_size", 
-            "best_distance", "convergence_gen", "runtime"
+            "best_distance", "convergence_gen", "runtime",
+            "experiment_name", "algorithm", "run_id", "seed", "dataset_name",
+            "n_cities", "pop_size", "generations", "elitism_k",
+            "generation_found", "runtime_seconds", "fitness_evaluations",
+            "base_seed", "git_commit", "coordinate_source_or_seed",
+            "distance_metric", "known_optimum", "known_optimum_note",
+            "optimality_gap", "optimality_gap_reason",
+            "nearest_neighbor_distance", "baseline_relative_improvement_percent"
         ]
         
         # Ensure destination folder exists

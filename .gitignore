@@ -1,5 +1,6 @@
-./venv/
-./__pcycache__/.
+.venv/
+venv/
+__pycache__/
 *.pyc
 outputs/
 

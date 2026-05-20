@@ -1,12 +1,31 @@
 import numpy as np
 import os
 import random
+from typing import Any
 from core.ga_engine import GAEngine
-from core.config import DEFAULT_CONFIG
 from utils.exporter import Exporter
 from utils.logger import setup_logger
+from utils.results_reporting import (
+    append_raw_result,
+    build_optimality_fields,
+    get_git_commit_hash,
+    update_summary_statistics,
+    upsert_dataset_metadata,
+)
 
-def run_single_experiment(experiment_name: str, config: dict, dist_matrix: np.ndarray, cities: np.ndarray = None, seed: int = None):
+def run_single_experiment(
+    experiment_name: str,
+    config: dict,
+    dist_matrix: np.ndarray,
+    cities: np.ndarray = None,
+    seed: int = None,
+    dataset_name: str = None,
+    coordinate_source_or_seed: str = None,
+    known_optimum: Any = "N/A",
+    algorithm: str = "core_ga",
+    run_id: str = None,
+    summary_experiment_name: str = None,
+):
     if seed is not None:
         np.random.seed(seed)
         random.seed(seed)
@@ -17,8 +36,29 @@ def run_single_experiment(experiment_name: str, config: dict, dist_matrix: np.nd
     logger = setup_logger(folder_path)
     logger.info(f"Starting experiment: {experiment_name}")
     logger.info(f"Output folder: {folder_path}")
+
+    n_cities = int(dist_matrix.shape[0])
+    dataset_name = dataset_name or f"generated_{n_cities}_cities"
+    coordinate_source_or_seed = coordinate_source_or_seed or (
+        "provided coordinates" if cities is not None else "distance matrix only"
+    )
+    git_commit = get_git_commit_hash()
+
+    config_snapshot = dict(config)
+    config_snapshot.update(
+        {
+            "algorithm": algorithm,
+            "seed": seed if seed is not None else "N/A",
+            "base_seed": config.get("base_seed", seed if seed is not None else "N/A"),
+            "dataset_name": dataset_name,
+            "coordinate_source_or_seed": coordinate_source_or_seed,
+            "distance_metric": "euclidean",
+            "known_optimum": known_optimum,
+            "git_commit": git_commit,
+        }
+    )
     
-    exporter.save_config(folder_path, config)
+    exporter.save_config(folder_path, config_snapshot)
     
     engine = GAEngine(config, dist_matrix)
     results = engine.run(callback=config.get('gui_callback', None))
@@ -39,6 +79,50 @@ def run_single_experiment(experiment_name: str, config: dict, dist_matrix: np.nd
         results['runtime']
     )
     exporter.save_population_snapshot(folder_path, results['final_population'], config['generations'])
+
+    optimality_fields = build_optimality_fields(
+        best_distance=results["best_distance"],
+        known_optimum=known_optimum,
+        dist_matrix=dist_matrix,
+    )
+    upsert_dataset_metadata(
+        dataset_name=dataset_name,
+        n_cities=n_cities,
+        coordinate_source_or_seed=coordinate_source_or_seed,
+        distance_metric="euclidean",
+        known_optimum=optimality_fields.get("known_optimum", "N/A"),
+        known_optimum_note=optimality_fields.get("known_optimum_note", ""),
+    )
+
+    raw_experiment_name = summary_experiment_name or experiment_name
+    pop_size = config.get("population_size", config.get("pop_size", ""))
+    elitism_k = config.get("elitism_k", config.get("elite_size", ""))
+    raw_row = {
+        "experiment_name": raw_experiment_name,
+        "algorithm": algorithm,
+        "run_id": run_id or experiment_name,
+        "seed": seed if seed is not None else "N/A",
+        "dataset_name": dataset_name,
+        "n_cities": n_cities,
+        "pop_size": pop_size,
+        "generations": config.get("generations", ""),
+        "crossover_type": config.get("crossover_type", ""),
+        "mutation_type": config.get("mutation_type", ""),
+        "selection_type": config.get("selection_type", ""),
+        "mutation_rate": config.get("mutation_rate", ""),
+        "elitism_k": elitism_k,
+        "best_distance": results["best_distance"],
+        "generation_found": results["convergence_gen"],
+        "runtime_seconds": results["runtime"],
+        "fitness_evaluations": results.get("fitness_evaluations", "N/A"),
+        "base_seed": config.get("base_seed", seed if seed is not None else "N/A"),
+        "git_commit": git_commit,
+        "coordinate_source_or_seed": coordinate_source_or_seed,
+        "distance_metric": "euclidean",
+        **optimality_fields,
+    }
+    append_raw_result(raw_row)
+    update_summary_statistics()
 
     # Generate visualization artifacts if history and city coordinates available
     try:

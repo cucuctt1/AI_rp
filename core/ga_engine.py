@@ -15,8 +15,10 @@ class GAEngine:
         self.dist_matrix = dist_matrix
         self.num_cities = dist_matrix.shape[0]
         self.logger = get_logger()
+        self.fitness_evaluations = 0
         
     def _route_distance(self, route):
+        self.fitness_evaluations += 1
         total = 0.0
         n = len(route)
         for i in range(n):
@@ -33,6 +35,7 @@ class GAEngine:
 
     def run(self, callback=None):
         start_time = time.time()
+        self.fitness_evaluations = 0
         
         # Setup operators
         selection_fn = roulette_selection if self.config.get('selection_type', DEFAULT_CONFIG['selection_type']) == 'roulette' else tournament_selection
@@ -147,5 +150,6 @@ class GAEngine:
             'best_route_history': best_route_history,
             'best_distance_history': best_distance_history,
             'final_population': population,
-            'runtime': runtime
+            'runtime': runtime,
+            'fitness_evaluations': int(self.fitness_evaluations)
         }

@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, List, Optional
 from experiments.runner import run_single_experiment
 from utils.exporter import Exporter
 from utils.logger import setup_logger
+from utils.results_reporting import build_optimality_fields, get_git_commit_hash
 
 def run_grid_search(
     base_config: dict,
@@ -18,6 +19,9 @@ def run_grid_search(
     num_trials: int = 1,
     seed_offset: int = 42,
     per_trial_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    dataset_name: str = None,
+    coordinate_source_or_seed: str = None,
+    known_optimum: Any = "N/A",
 ):
     """
     param_grid: dictionary where keys are config keys, and values are lists of options to try.
@@ -38,22 +42,42 @@ def run_grid_search(
     logger.info(f"Total configurations: {len(combinations)}, Total runs: {total_runs}")
     
     run_counter = 0
+    n_cities = int(dist_matrix.shape[0])
+    dataset_name = dataset_name or f"generated_{n_cities}_cities"
+    coordinate_source_or_seed = coordinate_source_or_seed or (
+        "provided coordinates" if cities is not None else "distance matrix only"
+    )
+    git_commit = get_git_commit_hash()
     
     for combo in combinations:
         # Create a specific config for this combination
         current_config = copy.deepcopy(base_config)
         for k, v in zip(keys, combo):
             current_config[k] = v
+        current_config["base_seed"] = seed_offset
             
         for trial in range(num_trials):
             run_counter += 1
             experiment_id = f"{base_experiment_name}_cfg{''.join(str(c) for c in combo)}_trial{trial}"
             current_seed = seed_offset + run_counter
+            current_config["seed"] = current_seed
             
             logger.info(f"--- Running {run_counter}/{total_runs} : {experiment_id} ---")
             
             # Use the single runner
-            results, folder_path = run_single_experiment(experiment_id, current_config, dist_matrix, cities=cities, seed=current_seed)
+            results, folder_path = run_single_experiment(
+                experiment_id,
+                current_config,
+                dist_matrix,
+                cities=cities,
+                seed=current_seed,
+                dataset_name=dataset_name,
+                coordinate_source_or_seed=coordinate_source_or_seed,
+                known_optimum=known_optimum,
+                algorithm="core_ga",
+                run_id=experiment_id,
+                summary_experiment_name=base_experiment_name,
+            )
 
             if per_trial_callback is not None:
                 try:
@@ -86,16 +110,40 @@ def run_grid_search(
             logger = setup_logger()
 
             # Aggregate stats to raw_runs.csv (written inside batch parent)
+            optimality_fields = build_optimality_fields(
+                best_distance=results["best_distance"],
+                known_optimum=known_optimum,
+                dist_matrix=dist_matrix,
+            )
+            pop_size = current_config.get('population_size', current_config.get('pop_size', ''))
+            elitism_k = current_config.get('elitism_k', current_config.get('elite_size', ''))
             batch_result_row = {
                 "experiment_id": experiment_id,
                 "crossover_type": current_config.get('crossover_type', ''),
                 "mutation_type": current_config.get('mutation_type', ''),
                 "mutation_rate": current_config.get('mutation_rate', ''),
                 "selection_type": current_config.get('selection_type', ''),
-                "population_size": current_config.get('population_size', ''),
+                "population_size": pop_size,
                 "best_distance": results['best_distance'],
                 "convergence_gen": results['convergence_gen'],
-                "runtime": round(results['runtime'], 4)
+                "runtime": round(results['runtime'], 4),
+                "experiment_name": base_experiment_name,
+                "algorithm": "core_ga",
+                "run_id": experiment_id,
+                "seed": current_seed,
+                "dataset_name": dataset_name,
+                "n_cities": n_cities,
+                "pop_size": pop_size,
+                "generations": current_config.get('generations', ''),
+                "elitism_k": elitism_k,
+                "generation_found": results['convergence_gen'],
+                "runtime_seconds": results['runtime'],
+                "fitness_evaluations": results.get("fitness_evaluations", "N/A"),
+                "base_seed": seed_offset,
+                "git_commit": git_commit,
+                "coordinate_source_or_seed": coordinate_source_or_seed,
+                "distance_metric": "euclidean",
+                **optimality_fields,
             }
             exporter.append_batch_results(batch_result_row, dest_folder=batch_parent)
             

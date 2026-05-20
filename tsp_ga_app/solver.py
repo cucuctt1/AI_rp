@@ -57,6 +57,7 @@ def genetic_algorithm(
     elite_size: int = ELITE_SIZE,
     tournament_size: int = TOURNAMENT_SIZE,
     progress_callback: ProgressCallback = None,
+    return_metadata: bool = False,
 ) -> Tuple[List[int], float, List[float], List[List[int]], float]:
     """Run GA and return best solution, convergence history, and frame routes."""
     set_distance_matrix(dist_matrix)
@@ -67,12 +68,18 @@ def genetic_algorithm(
 
     best_distance_history: List[float] = []
     best_route_history: List[List[int]] = []
+    fitness_evaluations = 0
 
-    initial_distances = [route_distance(route, dist_matrix) for route in population]
+    def counted_route_distance(route: List[int]) -> float:
+        nonlocal fitness_evaluations
+        fitness_evaluations += 1
+        return route_distance(route, dist_matrix)
+
+    initial_distances = [counted_route_distance(route) for route in population]
     initial_best_distance = float(min(initial_distances))
 
     for generation_idx in range(generations):
-        distances = [route_distance(route, dist_matrix) for route in population]
+        distances = [counted_route_distance(route) for route in population]
         generation_best_idx = int(np.argmin(distances))
         generation_best_route = list(population[generation_best_idx])
         generation_best_distance = float(distances[generation_best_idx])
@@ -131,4 +138,7 @@ def genetic_algorithm(
             mutation_rate=mutation_rate,
         )
 
-    return best_route, best_distance, best_distance_history, best_route_history, initial_best_distance
+    result = (best_route, best_distance, best_distance_history, best_route_history, initial_best_distance)
+    if return_metadata:
+        return (*result, {"fitness_evaluations": int(fitness_evaluations)})
+    return result

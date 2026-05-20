@@ -48,14 +48,18 @@ class SolverWorker(QtCore.QObject):
         backend = ""
         compare_enabled = False
         primary_runtime: Optional[float] = None
+        primary_metadata: Dict[str, Any] = {}
         total_runtime: Optional[float] = None
         start_overall = time.perf_counter()
 
         try:
             seed = self.params["seed"]
-            if seed is not None:
-                random.seed(seed)
-                np.random.seed(seed)
+            if seed is None:
+                seed = int(time.time_ns() % 1_000_000_000)
+                self.params["seed"] = seed
+                self.params["seed_is_generated"] = True
+            random.seed(seed)
+            np.random.seed(seed)
 
             cities = self.params.get("cities")
             if cities is None:
@@ -135,23 +139,38 @@ class SolverWorker(QtCore.QObject):
                 raise ValueError("Backend must be either 'custom' or 'simpleai'.")
 
             primary_start = time.perf_counter()
-            (
-                best_route,
-                best_distance,
-                best_distance_history,
-                best_route_history,
-                initial_best_distance,
-            ) = solver(
-                cities=cities,
-                dist_matrix=dist_matrix,
-                pop_size=int(self.params["pop_size"]),
-                generations=int(self.params["generations"]),
-                mutation_rate=float(self.params["mutation_rate"]),
-                crossover_rate=float(self.params["crossover_rate"]),
-                elite_size=int(self.params["elite_size"]),
-                tournament_size=int(self.params["tournament_size"]),
-                progress_callback=self._build_progress_callback(source="primary", series_name=backend),
-            )
+            solver_kwargs = {
+                "cities": cities,
+                "dist_matrix": dist_matrix,
+                "pop_size": int(self.params["pop_size"]),
+                "generations": int(self.params["generations"]),
+                "mutation_rate": float(self.params["mutation_rate"]),
+                "crossover_rate": float(self.params["crossover_rate"]),
+                "elite_size": int(self.params["elite_size"]),
+                "tournament_size": int(self.params["tournament_size"]),
+                "progress_callback": self._build_progress_callback(source="primary", series_name=backend),
+            }
+            if solver is genetic_algorithm_custom:
+                solver_kwargs["return_metadata"] = True
+
+            solver_result = solver(**solver_kwargs)
+            if len(solver_result) == 6:
+                (
+                    best_route,
+                    best_distance,
+                    best_distance_history,
+                    best_route_history,
+                    initial_best_distance,
+                    primary_metadata,
+                ) = solver_result
+            else:
+                (
+                    best_route,
+                    best_distance,
+                    best_distance_history,
+                    best_route_history,
+                    initial_best_distance,
+                ) = solver_result
             primary_runtime = time.perf_counter() - primary_start
 
             primary_result = self._pack_solver_result(
@@ -207,6 +226,8 @@ class SolverWorker(QtCore.QObject):
                 "runtime_primary": primary_runtime,
                 "runtime_bat": bat_state.get("runtime"),
                 "runtime_total": total_runtime,
+                "seed": seed,
+                "primary_metadata": dict(primary_metadata),
                 # Compatibility keys kept for existing non-comparison code paths.
                 "best_route": list(primary_result["best_route"]),
                 "best_distance": float(primary_result["best_distance"]),
@@ -1345,6 +1366,22 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         params["num_cities"] = int(self.current_cities.shape[0])
         params["cities"] = np.asarray(self.current_cities, dtype=float)
         self._solver_params["num_cities"] = int(self.current_cities.shape[0])
+        selected_dataset = self.dataset_combo.currentText() if hasattr(self, "dataset_combo") else "Random cities"
+        if selected_dataset and selected_dataset != "Random cities":
+            dataset_name = selected_dataset
+            coordinate_source = f"loaded dataset: {selected_dataset}"
+        else:
+            dataset_name = f"gui_random_{int(self.current_cities.shape[0])}_cities"
+            if hasattr(self, "city_seed_check") and self.city_seed_check.isChecked():
+                coordinate_source = f"city_seed:{int(self.city_seed_spin.value())}"
+            else:
+                coordinate_source = "gui current city coordinates"
+        params["dataset_name"] = dataset_name
+        params["coordinate_source_or_seed"] = coordinate_source
+        params["known_optimum"] = "N/A"
+        self._solver_params["dataset_name"] = dataset_name
+        self._solver_params["coordinate_source_or_seed"] = coordinate_source
+        self._solver_params["known_optimum"] = "N/A"
 
         self._thread = QtCore.QThread(self)
         self._worker = SolverWorker(params)
@@ -1964,6 +2001,13 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         try:
             from utils.exporter import Exporter
             from utils.logger import setup_logger
+            from utils.results_reporting import (
+                append_raw_result,
+                build_optimality_fields,
+                get_git_commit_hash,
+                update_summary_statistics,
+                upsert_dataset_metadata,
+            )
 
             exporter = Exporter()
             # Experiment name reflect GUI run and basic params
@@ -1975,7 +2019,11 @@ class TSPControlPanel(QtWidgets.QMainWindow):
             setup_logger(folder_path)
 
             # Save config
-            exporter.save_config(folder_path, dict(self._solver_params))
+            result_seed = payload.get("seed", self._solver_params.get("seed", "N/A"))
+            config_snapshot = dict(self._solver_params)
+            config_snapshot["seed"] = result_seed if result_seed is not None else "N/A"
+            config_snapshot["git_commit"] = get_git_commit_hash()
+            exporter.save_config(folder_path, config_snapshot)
 
             # Build metrics from recorded primary distances (best-so-far history)
             metrics = []
@@ -2020,6 +2068,53 @@ class TSPControlPanel(QtWidgets.QMainWindow):
                 conv_gen,
                 runtime if runtime is not None else 0.0,
             )
+
+            try:
+                cities_for_metadata = np.asarray(payload.get("cities"), dtype=float)
+                dist_matrix = compute_distance_matrix(cities_for_metadata)
+                dataset_name = str(config_snapshot.get("dataset_name") or f"gui_{len(cities_for_metadata)}_cities")
+                coordinate_source = str(config_snapshot.get("coordinate_source_or_seed") or "gui current city coordinates")
+                known_optimum = config_snapshot.get("known_optimum", "N/A")
+                optimality_fields = build_optimality_fields(best_distance, known_optimum, dist_matrix)
+                upsert_dataset_metadata(
+                    dataset_name=dataset_name,
+                    n_cities=int(len(cities_for_metadata)),
+                    coordinate_source_or_seed=coordinate_source,
+                    distance_metric="euclidean",
+                    known_optimum=optimality_fields.get("known_optimum", "N/A"),
+                    known_optimum_note=optimality_fields.get("known_optimum_note", ""),
+                )
+                metadata = payload.get("primary_metadata") or {}
+                backend_name = str(primary_result.get("label", config_snapshot.get("backend", "custom"))).lower()
+                append_raw_result(
+                    {
+                        "experiment_name": cfg_name,
+                        "algorithm": f"gui_{backend_name}",
+                        "run_id": os.path.basename(folder_path),
+                        "seed": result_seed if result_seed is not None else "N/A",
+                        "dataset_name": dataset_name,
+                        "n_cities": int(len(cities_for_metadata)),
+                        "pop_size": config_snapshot.get("pop_size", ""),
+                        "generations": config_snapshot.get("generations", ""),
+                        "crossover_type": "crossover_OX1" if backend_name == "custom" else "N/A",
+                        "mutation_type": "inversion" if backend_name == "custom" else "N/A",
+                        "selection_type": "tournament" if backend_name == "custom" else "N/A",
+                        "mutation_rate": config_snapshot.get("mutation_rate", ""),
+                        "elitism_k": config_snapshot.get("elite_size", ""),
+                        "best_distance": best_distance,
+                        "generation_found": conv_gen,
+                        "runtime_seconds": runtime if runtime is not None else 0.0,
+                        "fitness_evaluations": metadata.get("fitness_evaluations", "N/A"),
+                        "base_seed": result_seed if result_seed is not None else "N/A",
+                        "git_commit": config_snapshot.get("git_commit", "N/A"),
+                        "coordinate_source_or_seed": coordinate_source,
+                        "distance_metric": "euclidean",
+                        **optimality_fields,
+                    }
+                )
+                update_summary_statistics()
+            except Exception:
+                pass
 
             # Population snapshot: save best route history as a lightweight snapshot
             try:

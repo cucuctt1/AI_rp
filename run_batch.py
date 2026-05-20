@@ -1,8 +1,5 @@
 import numpy as np
-
-def compute_distance_matrix(cities: np.ndarray) -> np.ndarray:
-    deltas = cities[:, np.newaxis, :] - cities[np.newaxis, :, :]
-    return np.sqrt(np.sum(deltas * deltas, axis=2))
+from tsp_ga_app.problem import compute_distance_matrix
 
 if __name__ == "__main__":
     from core.config import DEFAULT_CONFIG
@@ -24,4 +21,14 @@ if __name__ == "__main__":
     }
     
     # This will run 3 * 2 * 2 = 12 configurations, each num_trials times
-    run_grid_search(base_config, param_grid, dist_matrix, cities=cities, base_experiment_name="grid_search", num_trials=2)
+    run_grid_search(
+        base_config,
+        param_grid,
+        dist_matrix,
+        cities=cities,
+        base_experiment_name="grid_search",
+        num_trials=2,
+        dataset_name="generated_random_30_seed_42",
+        coordinate_source_or_seed="numpy.random.seed(42); uniform(0,100)",
+        known_optimum="N/A",
+    )
