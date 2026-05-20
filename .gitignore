@@ -4,3 +4,6 @@
 outputs/
 
 *.csv
+*.md
+*.html
+*.pdf
