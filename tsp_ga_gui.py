@@ -1,4 +1,5 @@
-from gui_runner import main
+from app.ui.legacy_window import main
+
 
 if __name__ == "__main__":
     main()
