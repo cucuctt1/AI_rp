@@ -6,6 +6,7 @@ import numpy as np
 from typing import Any, Callable, Dict, List, Optional
 
 from app.experiments.runner import run_single_experiment
+from app.experiments.config_mapping import normalize_core_ga_config
 from app.reporting.exporter import Exporter
 from app.reporting.logger import setup_logger
 from app.reporting.results import build_optimality_fields, get_git_commit_hash
@@ -51,9 +52,10 @@ def run_grid_search(
     
     for combo in combinations:
         # Create a specific config for this combination
-        current_config = copy.deepcopy(base_config)
+        current_config = normalize_core_ga_config(copy.deepcopy(base_config))
         for k, v in zip(keys, combo):
             current_config[k] = v
+        current_config = normalize_core_ga_config(current_config)
         current_config["base_seed"] = seed_offset
             
         for trial in range(num_trials):

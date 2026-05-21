@@ -58,15 +58,14 @@ def crossover_OX1(
     child = [-1] * size
     child[left : right + 1] = parent_a[left : right + 1]
 
-    taken = set(child[left : right + 1])
     insert_pos = (right + 1) % size
+    ordered_genes = list(parent_b[right + 1 :]) + list(parent_b[: right + 1])
 
-    # Fill remaining slots in the order parent_b appears, skipping duplicates.
-    for gene in parent_b:
-        if gene in taken:
+    # Standard OX1 reads parent_b from right + 1 with wrap-around and fills
+    # child from the same wrap-around position.
+    for gene in ordered_genes:
+        if gene in child:
             continue
-        while child[insert_pos] != -1:
-            insert_pos = (insert_pos + 1) % size
         child[insert_pos] = gene
         insert_pos = (insert_pos + 1) % size
 

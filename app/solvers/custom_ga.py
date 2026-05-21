@@ -99,10 +99,12 @@ def genetic_algorithm(
             fitnesses = [1.0 / d if d > 0 else 0.0 for d in distances]
             avg_fitness = float(np.mean(fitnesses)) if fitnesses else 0.0
             std_fitness = float(np.std(fitnesses)) if fitnesses else 0.0
+            worst_fitness = float(np.min(fitnesses)) if fitnesses else 0.0
             diversity = int(len(set(tuple(ind) for ind in population)))
         except Exception:
             avg_fitness = 0.0
             std_fitness = 0.0
+            worst_fitness = 0.0
             diversity = 0
 
         if progress_callback is not None:
@@ -117,6 +119,7 @@ def genetic_algorithm(
                 "best_distance": float(best_distance),
                 "avg_fitness": avg_fitness,
                 "std_fitness": std_fitness,
+                "worst_fitness": worst_fitness,
                 "diversity": diversity,
             }
             try:

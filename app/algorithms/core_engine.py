@@ -44,7 +44,16 @@ class GAEngine:
         self.fitness_evaluations = 0
         
         # Setup operators
-        selection_fn = roulette_selection if self.config.get('selection_type', DEFAULT_CONFIG['selection_type']) == 'roulette' else tournament_selection_fitness
+        selection_type = self.config.get('selection_type', DEFAULT_CONFIG['selection_type'])
+        tournament_size = int(self.config.get('tournament_size', DEFAULT_CONFIG.get('tournament_size', 3)))
+        if selection_type == 'roulette':
+            selection_fn = roulette_selection
+        else:
+            selection_fn = lambda pop, fit: tournament_selection_fitness(
+                pop,
+                fit,
+                k=min(max(1, tournament_size), len(pop)),
+            )
         crossover_fn = order_crossover if self.config.get('crossover_type', DEFAULT_CONFIG['crossover_type']) == 'order' else pmx_crossover
         
         mut_type = self.config.get('mutation_type', DEFAULT_CONFIG['mutation_type'])

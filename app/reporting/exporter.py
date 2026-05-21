@@ -30,9 +30,17 @@ class Exporter:
         ['generation', 'best_fitness', 'avg_fitness', 'worst_fitness']
         """
         file_path = os.path.join(folder_path, "metrics.csv")
-        metrics_keys = ['generation', 'best_fitness', 'avg_fitness', 'worst_fitness']
+        preferred = ['generation', 'best_fitness', 'avg_fitness', 'worst_fitness', 'std_fitness', 'diversity']
+        metrics_keys = []
+        for key in preferred:
+            if key not in metrics_keys:
+                metrics_keys.append(key)
+        for metric in metrics:
+            for key in metric.keys():
+                if key not in metrics_keys:
+                    metrics_keys.append(key)
         with open(file_path, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.DictWriter(f, fieldnames=metrics_keys)
+            writer = csv.DictWriter(f, fieldnames=metrics_keys, extrasaction="ignore")
             writer.writeheader()
             writer.writerows(metrics)
 
@@ -68,6 +76,12 @@ class Exporter:
 
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(clean_population, f, indent=4)
+
+    def save_best_route_history(self, folder_path: str, route_history: list):
+        file_path = os.path.join(folder_path, "best_route_history.json")
+        clean_history = [[int(city) for city in route] for route in route_history]
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(clean_history, f, indent=4)
 
     def save_figure(self, folder_path: str, fig, filename: str):
         """Save a Matplotlib Figure object to the experiment folder as PNG."""

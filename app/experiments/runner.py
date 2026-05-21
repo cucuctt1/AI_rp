@@ -3,6 +3,7 @@ import os
 import random
 from typing import Any
 from app.algorithms.core_engine import GAEngine
+from app.experiments.config_mapping import normalize_core_ga_config
 from app.reporting.exporter import Exporter
 from app.reporting.logger import setup_logger
 from app.reporting.results import (
@@ -26,6 +27,8 @@ def run_single_experiment(
     run_id: str = None,
     summary_experiment_name: str = None,
 ):
+    config = normalize_core_ga_config(config)
+
     if seed is not None:
         np.random.seed(seed)
         random.seed(seed)

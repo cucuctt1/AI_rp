@@ -43,6 +43,7 @@ DEFAULT_CONFIG = {
     "selection_type": "tournament",
     "generations": 500,
     "elitism_k": 2,
+    "tournament_size": 3,
     "adaptive_mutation": False,
     "local_search_freq": 0,
 }

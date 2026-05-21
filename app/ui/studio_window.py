@@ -61,8 +61,12 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self._raw_primary_steps: List[int] = []
         self._raw_primary_distances: List[float] = []
         self._raw_primary_avg_fitness: List[float] = []
+        self._raw_primary_std_fitness: List[float] = []
+        self._raw_primary_worst_fitness: List[float] = []
         self._raw_primary_diversity: List[int] = []
         self._raw_primary_avg_steps: List[int] = []
+        self._raw_primary_std_steps: List[int] = []
+        self._raw_primary_worst_steps: List[int] = []
         self._raw_primary_div_steps: List[int] = []
         self._raw_compare_steps: List[int] = []
         self._raw_compare_distances: List[float] = []
@@ -555,6 +559,8 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         generation = payload.get("generation")
         distance = payload.get("best_distance")
         avg_fitness = payload.get("avg_fitness")
+        std_fitness = payload.get("std_fitness")
+        worst_fitness = payload.get("worst_fitness")
         diversity = payload.get("diversity")
 
         if source == "bat":
@@ -581,6 +587,14 @@ class TSPControlPanel(QtWidgets.QMainWindow):
             if generation is not None:
                 self._raw_primary_avg_steps.append(int(generation))
             self._latest_primary_metrics["avg_fitness"] = float(avg_fitness)
+        if std_fitness is not None:
+            self._raw_primary_std_fitness.append(float(std_fitness))
+            if generation is not None:
+                self._raw_primary_std_steps.append(int(generation))
+        if worst_fitness is not None:
+            self._raw_primary_worst_fitness.append(float(worst_fitness))
+            if generation is not None:
+                self._raw_primary_worst_steps.append(int(generation))
         if diversity is not None:
             self._raw_primary_diversity.append(int(diversity))
             if generation is not None:
@@ -882,8 +896,12 @@ class TSPControlPanel(QtWidgets.QMainWindow):
         self._raw_primary_steps = []
         self._raw_primary_distances = []
         self._raw_primary_avg_fitness = []
+        self._raw_primary_std_fitness = []
+        self._raw_primary_worst_fitness = []
         self._raw_primary_diversity = []
         self._raw_primary_avg_steps = []
+        self._raw_primary_std_steps = []
+        self._raw_primary_worst_steps = []
         self._raw_primary_div_steps = []
         self._raw_compare_steps = []
         self._raw_compare_distances = []
@@ -919,11 +937,18 @@ class TSPControlPanel(QtWidgets.QMainWindow):
             "enable_bat_comparison": bool(self.enable_bat_compare_check.isChecked()),
             "num_cities": int(self.num_cities_spin.value()),
             "pop_size": pop_size,
+            "population_size": pop_size,
             "generations": int(self.generations_spin.value()),
             "mutation_rate": float(self.mutation_spin.value()),
             "crossover_rate": float(self.crossover_spin.value()),
+            "crossover_type": "order",
             "elite_size": elite_size,
+            "elitism_k": elite_size,
             "tournament_size": tournament_size,
+            "selection_type": "tournament",
+            "mutation_type": "reverse",
+            "adaptive_mutation": False,
+            "local_search_freq": 0,
             "seed": seed_value,
             "bat_frequency_min": float(self.bat_freq_min_spin.value()),
             "bat_frequency_max": float(self.bat_freq_max_spin.value()),
@@ -1564,6 +1589,10 @@ class TSPControlPanel(QtWidgets.QMainWindow):
                     "steps": primary_steps,
                     "avg_fitness": list(self._raw_primary_avg_fitness),
                     "avg_fitness_steps": list(self._raw_primary_avg_steps),
+                    "std_fitness": list(self._raw_primary_std_fitness),
+                    "std_fitness_steps": list(self._raw_primary_std_steps),
+                    "worst_fitness": list(self._raw_primary_worst_fitness),
+                    "worst_fitness_steps": list(self._raw_primary_worst_steps),
                     "diversity": list(self._raw_primary_diversity),
                     "diversity_steps": list(self._raw_primary_div_steps),
                 },
@@ -1617,15 +1646,21 @@ class TSPControlPanel(QtWidgets.QMainWindow):
             config_snapshot["git_commit"] = get_git_commit_hash()
             exporter.save_config(folder_path, config_snapshot)
 
-            # Build metrics from recorded primary distances (best-so-far history)
+            # Build metrics from recorded primary live payloads.
             metrics = []
             prim_distances = list(self.primary_distances)
+            avg_by_step = dict(zip(self._raw_primary_avg_steps, self._raw_primary_avg_fitness))
+            std_by_step = dict(zip(self._raw_primary_std_steps, self._raw_primary_std_fitness))
+            worst_by_step = dict(zip(self._raw_primary_worst_steps, self._raw_primary_worst_fitness))
+            diversity_by_step = dict(zip(self._raw_primary_div_steps, self._raw_primary_diversity))
             for i, d in enumerate(prim_distances, start=1):
                 metric = {
                     'generation': i,
                     'best_fitness': (1.0 / d) if d and d > 0 else None,
-                    'avg_fitness': None,
-                    'worst_fitness': None,
+                    'avg_fitness': avg_by_step.get(i),
+                    'worst_fitness': worst_by_step.get(i),
+                    'std_fitness': std_by_step.get(i),
+                    'diversity': diversity_by_step.get(i),
                 }
                 metrics.append(metric)
 
@@ -1708,10 +1743,10 @@ class TSPControlPanel(QtWidgets.QMainWindow):
             except Exception:
                 pass
 
-            # Population snapshot: save best route history as a lightweight snapshot
+            # GUI runs stream best-so-far routes, not full populations.
             try:
                 snapshot = list(primary_result.get('best_route_history', []))
-                exporter.save_population_snapshot(folder_path, snapshot, len(snapshot))
+                exporter.save_best_route_history(folder_path, snapshot)
             except Exception:
                 # best_route_history may not be present; ignore
                 pass
