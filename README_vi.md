@@ -1,333 +1,156 @@
-# Huong dan chi tiet (Tieng Viet) - TSP bang Genetic Algorithm
+# Bộ Giải TSP Bằng Giải Thuật Di Truyền Đã Được Tái Cấu Trúc
 
-Tai lieu nay mo ta day du cach to chuc code theo nhieu file, cach thuat toan hoat dong, va cach chay/chinh sua.
+Thư mục này là bản tái cấu trúc độc lập của dự án gốc. Các file gốc nằm ngoài `new_refract/` không cần thiết khi chạy chương trình.
 
-## 1. Tong quan
-
-Du an giai bai toan Travelling Salesman Problem (TSP) bang Genetic Algorithm (GA) voi cac thanh phan chinh:
-
-- Bieu dien ca the bang hoan vi chi so thanh pho (path representation)
-- Selection: Tournament Selection (k = 3)
-- Crossover: Order Crossover OX1
-- Mutation: Inversion Mutation
-- Elitism: giu lai top ELITE_SIZE ca the tot nhat moi the he
-- Ho tro 2 backend:
-  - custom: GA tu cai dat tay
-  - simpleai: su dung thu vien simpleAI (genetic)
-- Co them BAT-inspired solver de so sanh trong GUI (comparison mode)
-- Visualization:
-  - Animation qua trinh toi uu bang FuncAnimation
-  - Bieu do route cuoi cung
-  - Bieu do hoi tu (convergence)
-
-## 2. Cau truc thu muc
-
-```text
-AI_rp/
-|-- tsp_ga.py
-|-- README_vi.md
-|-- tsp_ga_app/
-|   |-- __init__.py
-|   |-- config.py
-|   |-- main.py
-|   |-- problem.py
-|   |-- operators.py
-|   |-- solver.py
-|   |-- simpleai_solver.py
-|   |-- bat_solver.py
-|   |-- visualize.py
-|   |-- visualization.py
-```
-
-Y nghia tung file:
-
-- tsp_ga.py:
-  - Entry point gon, chi goi ham main de chay chuong trinh.
-- tsp_ga_app/config.py:
-  - Tat ca tham so mac dinh cua GA, visualization, va lua chon backend.
-- tsp_ga_app/main.py:
-  - Luong chay chinh, chon backend solver theo cau hinh.
-- tsp_ga_app/problem.py:
-  - Ham tao city, tinh distance matrix, tinh tong quang duong route, va fitness.
-- tsp_ga_app/operators.py:
-  - Cac toan tu tien hoa: tao quan the, tournament selection, OX1 crossover, inversion mutation, evolve population.
-- tsp_ga_app/solver.py:
-  - Vong lap GA chinh, theo doi best theo thoi gian, tra ve du lieu cho animation/convergence.
-- tsp_ga_app/simpleai_solver.py:
-  - Solver dung simpleAI genetic, co fallback manual (elitism/diversity) khi can, va giu API tuong thich voi solver custom.
-- tsp_ga_app/bat_solver.py:
-  - Solver BAT-inspired cho TSP, dung de compare voi backend dang chon trong GUI.
-- tsp_ga_app/visualize.py:
-  - Module visualization chinh de import plot_route, plot_convergence, animate_evolution.
-- tsp_ga_app/visualization.py:
-  - Module implementation visualization goc (duoc tai su dung boi visualize.py).
-
-## 3. Mapping cac ham bat buoc
-
-Tat ca ham yeu cau van co day du, nhung duoc tach theo module de de bao tri:
-
-- generate_cities: problem.py
-- compute_distance_matrix: problem.py
-- route_distance: problem.py
-- fitness: problem.py
-- create_population: operators.py
-- tournament_selection: operators.py
-- crossover_OX1: operators.py
-- mutation_inversion: operators.py
-- evolve_population: operators.py
-- genetic_algorithm: solver.py
-- plot_route: visualization.py
-- plot_convergence: visualization.py
-- animate_evolution: visualization.py
-
-Ham main nam o tsp_ga_app/main.py va duoc goi qua tsp_ga.py.
-
-## 3.1 Lua chon backend solver
-
-Trong tsp_ga_app/config.py:
-
-- SOLVER_BACKEND = "simpleai" -> dung thu vien simpleAI
-- SOLVER_BACKEND = "custom" -> dung solver GA tu cai dat
-
-Khi dung backend simpleai, he thong ap dung them:
-
-- Multi-restart de tranh ket qua kem do random ban dau
-- 2-opt refinement sau GA de cai thien route cuoi
-- Fitness scaling theo mu (power) de tang ap luc chon loc
-
-Khi chay, chuong trinh se in backend dang dung trong output.
-
-## 4. Luong xu ly tong the
-
-1. Tao ngau nhien N thanh pho trong mat phang 2D.
-2. Tinh truoc distance matrix doi xung bang khoang cach Euclid.
-3. Tao quan the ban dau (cac hoan vi hop le).
-4. Lap qua moi generation:
-   - Danh gia distance cua tung route
-   - Cap nhat best route toan cuc
-   - Luu lich su best distance va best route (de ve va animate)
-   - Sinh quan the moi bang elitism + selection + crossover + mutation
-5. In ket qua cuoi cung (best route, best distance, muc cai thien).
-6. Hien thi animation, route cuoi, convergence.
-
-## 5. Chi tiet thuat toan
-
-### 5.1 Bieu dien chromosome
-
-Moi chromosome la mot list chi so thanh pho, vi du:
-
-```text
-[0, 3, 1, 4, 2]
-```
-
-Route hop le phai la hoan vi day du:
-
-- Khong trung lap
-- Khong thieu city
-- Do dai bang so thanh pho
-
-### 5.2 Ham muc tieu va fitness
-
-Tong do dai route tinh theo chu trinh kin, co canh quay ve diem dau:
-
-D(route) = sum(dist(route[i], route[i+1])) + dist(route[last], route[0])
-
-Fitness:
-
-F(route) = 1 / D(route)
-
-Distance cang nho thi fitness cang lon.
-
-### 5.3 Tournament Selection
-
-- Chon ngau nhien k = 3 ca the tu quan the
-- Ca the co distance nho nhat trong nhom se thang
-- Lap lai de lay parent A va parent B
-
-Uu diem:
-
-- De cai dat
-- Can bang giua khai pha (exploration) va khai thac (exploitation)
-
-### 5.4 OX1 Crossover (diem de sai nhat)
-
-Quy trinh:
-
-1. Chon 2 vi tri cat left, right.
-2. Copy doan parent A [left:right] vao dung vi tri trong child.
-3. Duyet parent B theo thu tu goc, bo qua gene da co trong child.
-4. Dien cac gene con lai vao child theo vong tron, bat dau tu vi tri right + 1.
-
-Dam bao:
-
-- Child luon la hoan vi hop le
-- Khong duplicate
-- Khong mat gene
-
-### 5.5 Inversion Mutation
-
-- Chon 2 moc i, j ngau nhien
-- Dao nguoc doan con route[i:j]
-
-Vi du:
-
-```text
-Truoc: [0, 1, 2, 3, 4, 5]
-Dao doan [2:4]
-Sau:   [0, 1, 4, 3, 2, 5]
-```
-
-Toan tu nay khong lam hu hoan vi.
-
-### 5.6 Elitism
-
-Moi generation giu nguyen top ELITE_SIZE ca the tot nhat.
-
-Loi ich:
-
-- Khong lam mat nghiem tot nhat da tim duoc
-- Tang do on dinh hoi tu
-
-## 6. Visualization
-
-### 6.1 Route plot
-
-- Scatter tat ca city
-- Noi duong di theo thu tu route
-- Dong chu trinh ve city dau
-- Hien nhan (index) tung city
-
-### 6.2 Convergence plot
-
-- Truc X: generation
-- Truc Y: best distance (best-so-far)
-- Duong xu huong giam cho thay tien bo toi uu
-
-### 6.3 Animation
-
-- Dung matplotlib.animation.FuncAnimation
-- Moi frame cap nhat:
-  - Toa do line route
-  - Tieu de: generation hien tai + best distance
-
-Neu backend khong interactive (vi du Agg), animation hien thi se duoc bo qua de tranh canh bao; phan tinh toan van chay binh thuong.
-
-Voi GUI PyQt5, animation live duoc chay theo co che buffer:
-
-- Solver va animation chay dong thoi (producer-consumer).
-- Co the dat toc do playback (ms/frame) de xem cham hon qua trinh toi uu.
-- Frame moi duoc cache trong buffer de animation phat lai dan.
-- Neu buffer tam thoi het frame (solver chua gui kip), animation se tam dung/freeze va tiep tuc khi co frame moi.
-- Co tuy chon Enable BAT comparison: GUI se chay them BAT-inspired solver, hien route thu 2 va ve de chong (overlay) tren cung bieu do convergence.
-
-## 7. Cach chay
-
-Tu thu muc AI_rp:
+## Chạy Chương Trình
 
 ```bash
-python tsp_ga.py
+python new_refract/main.py
 ```
 
-Mo giao dien PyQt5 de quan sat live va chinh tham so:
+Lệnh này khởi chạy giao diện Studio PyQt5 hiện tại.
+
+Các entrypoint khác:
 
 ```bash
-python tsp_ga.py --gui
+python new_refract/main.py --cli
+python new_refract/main.py --legacy-gui
+cd new_refract
+python main.py
+python -m pytest -q
 ```
 
-Hoac:
+## Cấu Trúc
 
-```bash
-python tsp_ga_gui.py
+- `app/` chứa phần triển khai chính đã được làm sạch.
+- `app/algorithms/` chứa các helper dùng chung cho bài toán TSP, các toán tử route và core GA engine legacy.
+- `app/solvers/` chứa custom GA, SimpleAI GA và BAT solver.
+- `app/ui/` chứa Studio UI, các đối tượng worker của UI và GUI legacy.
+- `app/experiments/` và `app/reporting/` chứa các runner thí nghiệm, exporter, logging và phần tổng hợp kết quả.
+- `core/`, `ga/`, `utils/`, `experiments/` và `tsp_ga_app/` là các compatibility wrapper để giữ các đường import cũ hoạt động.
+- `outputs/` là vị trí mặc định duy nhất để lưu các artifact được sinh ra từ bản tái cấu trúc này.
+
+## Hướng Dẫn Theo File
+
+### Các File Ở Thư Mục Gốc
+
+- `main.py` là entrypoint chính của dự án đã tái cấu trúc. Khi không truyền flag, file này mở Studio GUI; `--cli` chạy demo solver không dùng GUI; `--legacy-gui` mở GUI nhỏ cũ hơn.
+- `requirements.txt` liệt kê các thư viện Python cần cho ứng dụng đã tái cấu trúc, test, plotting, GUI, SimpleAI solver và xuất GIF.
+- `README.md` mô tả cách chạy dự án đã tái cấu trúc, cách tổ chức thư mục và trách nhiệm của từng file.
+- `run_single.py` chạy một thí nghiệm mẫu với các thành phố được sinh ra, legacy/core GA engine, quy trình xuất kết quả và metadata dùng cho báo cáo.
+- `run_batch.py` chạy một thí nghiệm batch grid search mẫu theo mutation rate, crossover type và selection type.
+- `tsp_ga.py` giữ hành vi launcher CLI top-level cũ. Mặc định file này chạy CLI solver và có hỗ trợ `--gui`.
+- `tsp_ga_gui.py` giữ launcher GUI legacy top-level cũ.
+- `gui_runner.py` giữ đường import/chạy GUI legacy cũ, đồng thời chuyển phần triển khai sang `app.ui.legacy_window`.
+
+### Gói Ứng Dụng Chính
+
+- `app/__init__.py` đánh dấu `app` là gói triển khai canonical của bản tái cấu trúc.
+- `app/paths.py` định nghĩa các đường dẫn cục bộ của dự án, đặc biệt là `PROJECT_ROOT` và `OUTPUT_ROOT`, để file được sinh ra vẫn nằm trong `new_refract/`.
+- `app/cli.py` chứa workflow solver không dùng GUI: thiết lập seed, sinh thành phố, tạo ma trận khoảng cách, chọn solver, in summary, tạo animation, vẽ route cuối và vẽ convergence plot.
+
+### Cấu Hình
+
+- `app/config/__init__.py` re-export các thiết lập để import thuận tiện hơn.
+- `app/config/settings.py` chứa toàn bộ hằng số mặc định: thiết lập population/generation của GA, mutation/crossover rate, cấu hình SimpleAI, mặc định so sánh BAT, thiết lập animation, random seed, đường dẫn GIF và `DEFAULT_CONFIG` legacy.
+
+### Thuật Toán
+
+- `app/algorithms/__init__.py` cung cấp các helper thuật toán chính và `GAEngine`.
+- `app/algorithms/problem.py` chứa các tiện ích chung cho bài toán TSP: trạng thái ma trận khoảng cách đang dùng, sinh thành phố ngẫu nhiên, tạo ma trận khoảng cách Euclid, tính route distance và fitness nghịch đảo theo khoảng cách.
+- `app/algorithms/operators.py` chứa các toán tử route/population được dùng trong dự án: tạo population, tournament selection dựa trên khoảng cách, OX1 crossover, inversion mutation, tiến hóa population, tournament/roulette selection dựa trên fitness, PMX/order crossover, swap/reverse/scramble mutation, elitism và local search 2-opt.
+- `app/algorithms/core_engine.py` chứa class core GA engine legacy có thể cấu hình, được dùng bởi experiment runners và GUI legacy. Engine này hỗ trợ lựa chọn selection/crossover/mutation operators, elitism, adaptive mutation, local search tùy chọn, metrics, history, runtime và callback progress.
+
+### Solver
+
+- `app/solvers/__init__.py` cung cấp ba solver entrypoint.
+- `app/solvers/custom_ga.py` chứa custom GA solver của ứng dụng, được Studio UI và CLI sử dụng. Solver này theo dõi best route, best distance, convergence history, route history, initial best distance, metadata tùy chọn và các live progress payload.
+- `app/solvers/simpleai_ga.py` chứa GA solver dựa trên SimpleAI. File này kiểm tra và làm sạch distance matrix, định nghĩa bài toán TSP cho SimpleAI, ghi history thông qua viewer, hỗ trợ hành vi GA manual fallback, elitism/diversity injection tùy chọn, chạy multi-restart và refinement 2-opt tùy chọn.
+- `app/solvers/bat.py` chứa metaheuristic TSP lấy cảm hứng từ BAT, được dùng cho các run so sánh trong Studio UI. Solver này triển khai guided movement an toàn với hoán vị, local walk, inversion mutation, cập nhật loudness/pulse, progress payload và convergence history.
+
+### Giao Diện
+
+- `app/ui/__init__.py` cung cấp Studio window và launcher.
+- `app/ui/studio_window.py` chứa Studio UI chính bằng PyQt5. File này xây dựng control panel và vùng plot đầy đủ, xử lý dataset, nút run/batch, các chế độ xem convergence, hộp thoại metrics, vẽ route, batch overlay, export sau khi chạy xong và toàn bộ hành vi hiển thị của Studio.
+- `app/ui/studio_workers.py` chứa các đối tượng Qt worker để chạy nền. `SolverWorker` chạy solver được chọn và so sánh BAT tùy chọn; `BatchWorker` chạy các batch grid search mà không chặn UI.
+- `app/ui/city_io.py` chứa các helper tái sử dụng để parse thành phố từ JSON cho point list, point map, dataset có tên, `cities`, `points` và các dictionary tọa độ.
+- `app/ui/legacy_window.py` chứa GUI PyQt5 nhỏ cũ hơn. File này giữ lại các control đơn giản trước đây, progress animation, route/convergence plot, load JSON và hành vi run/reset legacy.
+
+### Thí Nghiệm
+
+- `app/experiments/__init__.py` cung cấp các hàm runner thí nghiệm.
+- `app/experiments/runner.py` chạy một thí nghiệm đơn qua `GAEngine`, xuất config/metrics/best solution/summary/population snapshots, cập nhật raw result và summary CSV/JSON, đồng thời lưu plot/GIF nếu có thể.
+- `app/experiments/batch_runner.py` chạy các tổ hợp grid search theo parameter grid và số trial, tạo thư mục batch cha, chuyển output của từng trial vào bên trong, thêm batch raw results và lưu biểu đồ cột best distance của batch khi có thể.
+
+### Báo Cáo Và Xuất Kết Quả
+
+- `app/reporting/__init__.py` cung cấp các helper exporter và logging.
+- `app/reporting/exporter.py` tạo các thư mục thí nghiệm dưới `new_refract/outputs` và ghi config JSON, metrics CSV, best solution JSON, summary JSON, population snapshots, figures và các dòng batch raw result.
+- `app/reporting/logger.py` cấu hình logger `GA_TSP` cho console output và file log theo từng thí nghiệm nếu cần.
+- `app/reporting/results.py` quản lý result schema và summary reporting. File này chuyển giá trị NumPy sang dữ liệu an toàn cho JSON, đọc/ghi CSV/JSON, ghi dataset metadata, thêm raw results, tính nearest-neighbor baseline, xây dựng các trường optimality và cập nhật summary statistics.
+
+### Trực Quan Hóa
+
+- `app/visualization/__init__.py` cung cấp các helper plotting.
+- `app/visualization/plots.py` tạo Matplotlib route plot, convergence plot và animation tiến hóa route. File này cũng có thể lưu evolution GIF vào đường dẫn cục bộ đã cấu hình trong dự án.
+
+### Công Cụ
+
+- `app/tools/__init__.py` đánh dấu package tools.
+- `app/tools/gen_data.py` chuyển các dòng CSV theo kiểu TSPLIB thành dataset thành phố dạng JSON. File này xử lý giới hạn kích thước field CSV, tạo slug filename, parse tọa độ và xuất JSON theo từng instance.
+- `app/tools/reproduce_report_figures.py` đọc các file CSV báo cáo đã sinh ra và lưu các hình dùng cho báo cáo: best distance theo run, summary mean với confidence interval và số lượng thành phố theo dataset.
+
+### Compatibility Wrapper
+
+Các file này tồn tại để các đường import cũ vẫn hoạt động khi chạy bên trong `new_refract/`. Chúng nên giữ mỏng và chuyển tiếp sang `app.*`.
+
+- `core/__init__.py`, `core/config.py` và `core/ga_engine.py` giữ các import `core.*` cũ cho `DEFAULT_CONFIG` và `GAEngine`.
+- `ga/__init__.py`, `ga/selection.py`, `ga/crossover.py`, `ga/mutation.py`, `ga/elitism.py` và `ga/local_search.py` giữ các import toán tử GA cũ.
+- `utils/__init__.py`, `utils/exporter.py`, `utils/logger.py` và `utils/results_reporting.py` giữ các import reporting/logging cũ.
+- `experiments/__init__.py`, `experiments/runner.py` và `experiments/batch_runner.py` giữ các import experiment runner cũ.
+- `tsp_ga_app/__init__.py`, `tsp_ga_app/config.py`, `tsp_ga_app/problem.py`, `tsp_ga_app/operators.py`, `tsp_ga_app/solver.py`, `tsp_ga_app/simpleai_solver.py`, `tsp_ga_app/bat_solver.py`, `tsp_ga_app/visualization.py`, `tsp_ga_app/visualize.py`, `tsp_ga_app/gui.py` và `tsp_ga_app/main.py` giữ API của package ứng dụng cũ trong khi chuyển tiếp sang phần triển khai đã tái cấu trúc.
+- `data_gen/__init__.py` và `data_gen/gen_data.py` giữ đường import và đường script chuyển đổi dữ liệu cũ.
+- `scripts/__init__.py` và `scripts/reproduce_report_figures.py` giữ đường script tạo figure báo cáo cũ.
+
+### Kiểm Thử
+
+- `tests/conftest.py` bảo đảm `new_refract/` nằm trong `sys.path` khi chạy test.
+- `tests/test_selection.py` kiểm tra cả selection legacy dựa trên fitness và tournament selection của app dựa trên khoảng cách đều trả về route hợp lệ.
+- `tests/test_crossover.py` kiểm tra PMX, order crossover và OX1 đều tạo ra hoán vị hợp lệ.
+- `tests/test_mutation.py` kiểm tra swap, reverse, scramble và inversion mutation đều giữ route hợp lệ.
+- `tests/test_elitism.py` kiểm tra elitism của core giữ route có fitness tốt nhất và quá trình evolution của app giữ elite có khoảng cách thấp nhất.
+- `tests/test_distance.py` kiểm tra quá trình tạo ma trận khoảng cách Euclid và cyclic route distance.
+- `tests/test_route_validity.py` kiểm tra population được sinh ra chứa mỗi thành phố đúng một lần.
+- `tests/test_reproducibility.py` kiểm tra cùng seed tạo ra cùng best route và best distance qua `GAEngine`.
+- `tests/test_result_schema.py` kiểm tra raw result export chứa các trường bắt buộc.
+- `tests/test_dataset_metadata.py` kiểm tra dataset metadata export chứa các trường bắt buộc.
+- `tests/test_optimality_gap.py` kiểm tra phép tính gap so với known optimum và nhãn khi không có optimum.
+- `tests/test_output_isolation.py` kiểm tra output root mặc định của exporter nằm bên trong `new_refract/`.
+
+### Output
+
+- `outputs/.gitkeep` giữ thư mục output tồn tại trong version control.
+- `outputs/` là nơi CLI, GUI, experiment runners, báo cáo, summary, logs, figures, population snapshots và GIF được ghi mặc định.
+
+## Tương Thích
+
+Các import cũ vẫn hoạt động khi chạy bên trong `new_refract/`, ví dụ:
+
+```python
+from ga.selection import tournament_selection
+from core.ga_engine import GAEngine
+from tsp_ga_app.problem import compute_distance_matrix
+from utils.results_reporting import append_raw_result
 ```
 
-Neu can cai thu vien:
-
-```bash
-pip install numpy matplotlib simpleai pyqt5
-```
-
-## 8. Chinh tham so
-
-Tat ca tham so nam trong tsp_ga_app/config.py:
-
-- POP_SIZE = 100
-- GENERATIONS = 200
-- MUTATION_RATE = 0.2
-- CROSSOVER_RATE = 0.8
-- ELITE_SIZE = 2
-- NUM_CITIES = 20
-- TOURNAMENT_SIZE = 3
-- ANIMATION_INTERVAL_MS = 80
-
-## 9. Unified Run Instructions
-
-Use the canonical `tsp_ga_app` GUI or CLI wrappers to run experiments and batch searches. Outputs are written to the `outputs/` folder and include `config.json`, `metrics.csv`, `best_solution.json`, `summary.json`, and `experiment_log.txt`.
-
-Run interactive GUI:
-
-```bash
-python tsp_ga.py --gui
-```
-
-Run a single experiment via CLI (writes full artifacts):
-
-```bash
-python run_single.py
-```
-
-Run a batch/grid search (writes a batch parent folder with per-trial subfolders and `raw_runs.csv` inside the batch folder):
-
-```bash
-python run_batch.py
-```
-
-Generated visual artifacts per run:
-
-- `evolution.gif`: animated GIF of best-route evolution (if city coordinates provided)
-- `final_route.png`: final best route plot
-- `convergence.png`: convergence curve (best distance vs generation)
-
-Batch-level artifacts:
-
-- `batch_best_distances.png`: bar chart of best distances per run (saved inside batch parent folder)
+Các wrapper re-export hàm/class từ `app/`; code mới nên ưu tiên import từ `app.*`.
 
 
-- SOLVER_BACKEND = "custom"
-- ENABLE_BAT_COMPARISON = False
-- SIMPLEAI_RESTARTS = 8
-- SIMPLEAI_ENABLE_2OPT = True
-- SIMPLEAI_2OPT_MAX_PASSES = 25
-- SIMPLEAI_FITNESS_POWER = 2.0
-- SIMPLEAI_USE_NATIVE_GENETIC = True
-- SIMPLEAI_ENABLE_ELITISM = False
-- SIMPLEAI_DIVERSITY_RATE = 0.05
-- SIMPLEAI_EPSILON = 1e-3
-- RANDOM_SEED = 34230
-- SAVE_GIF = True
-- GIF_PATH = "tsp_ga_evolution.gif"
+# BẢNG PHÂN CÔNG NHIỆM VỤ
 
-Goi y:
-
-- Tang POP_SIZE hoac GENERATIONS -> nghiem thuong tot hon, nhung cham hon.
-- Tang MUTATION_RATE qua cao co the lam giam do on dinh.
-- ELITE_SIZE qua lon co the lam quan the de bi hoi tu som.
-- Neu backend simpleai con chua dat chat luong mong muon, tang SIMPLEAI_RESTARTS truoc.
-- Neu can chat luong cao hon nua, tang SIMPLEAI_2OPT_MAX_PASSES (doi lai se cham hon).
-
-## 9. Bao dam tinh dung
-
-Code dang co cac co che bao ve:
-
-- Kiem tra population khong rong
-- Kiem tra parent cung do dai khi crossover
-- Kiem tra child sau OX1 la hoan vi hop le
-- Kiem tra child sau mutation/evolution van la hoan vi hop le
-- Luon tinh distance matrix mot lan va tai su dung
-- Route distance luon tinh ca canh quay ve diem dau
-
-## 10. Mo rong de xuat
-
-- Thu nghiem nhieu seed de danh gia do on dinh
-- So sanh them PMX hoac CX crossover voi OX1
-- Them benchmark theo NUM_CITIES lon hon
-- Ghi log best distance ra file CSV de phan tich sau
+| Thành viên | Nhiệm vụ |
+|---|---|
+| Tất Chí Thành | Phụ trách đột biến và cơ chế elitism trong GA, đồng thời kiểm tra tính hợp lệ của lời giải sau mỗi thế hệ và hỗ trợ phần đo lường hiệu suất liên quan đến hội tụ. |
+| Nguyễn Minh Thức | Phụ trách giao diện người dùng và luồng tương tác của chương trình, bao gồm nhập tham số, chọn dữ liệu, chạy thuật toán và hiển thị kết quả. |
+| Trần Xuân Phát | Phụ trách xử lý dữ liệu đầu vào và hàm khoảng cách, bao gồm đọc JSON, sinh random cities, xây dựng ma trận khoảng cách và tính fitness dựa trên route distance. |
+| Vũ Đặng Khánh My | Phụ trách selection, crossover và khởi tạo quần thể trong GA, đảm bảo các toán tử di truyền tạo ra cá thể hợp lệ theo biểu diễn hoán vị. |

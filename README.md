@@ -1,16 +1,16 @@
-# Refactored TSP Genetic Solver
+# Bộ Giải TSP Bằng Giải Thuật Di Truyền Đã Được Tái Cấu Trúc
 
-This folder is a self-contained refactor of the original project. Original files outside `new_refract/` are not required at runtime.
+Thư mục này là bản tái cấu trúc độc lập của dự án gốc. Các file gốc nằm ngoài `new_refract/` không cần thiết khi chạy chương trình.
 
-## Run
+## Chạy Chương Trình
 
 ```bash
 python new_refract/main.py
 ```
 
-Launches the current Studio PyQt5 UI.
+Lệnh này khởi chạy giao diện Studio PyQt5 hiện tại.
 
-Other entrypoints:
+Các entrypoint khác:
 
 ```bash
 python new_refract/main.py --cli
@@ -20,121 +20,121 @@ python main.py
 python -m pytest -q
 ```
 
-## Layout
+## Cấu Trúc
 
-- `app/` contains the clean implementation.
-- `app/algorithms/` contains shared TSP problem helpers, route operators, and the legacy core GA engine.
-- `app/solvers/` contains the custom GA, SimpleAI GA, and BAT solver.
-- `app/ui/` contains the Studio UI, UI worker objects, and the legacy GUI.
-- `app/experiments/` and `app/reporting/` contain experiment runners, exporters, logging, and result summaries.
-- `core/`, `ga/`, `utils/`, `experiments/`, and `tsp_ga_app/` are compatibility wrappers for old import paths.
-- `outputs/` is the only default location for generated artifacts from this refactor.
+- `app/` chứa phần triển khai chính đã được làm sạch.
+- `app/algorithms/` chứa các helper dùng chung cho bài toán TSP, các toán tử route và core GA engine legacy.
+- `app/solvers/` chứa custom GA, SimpleAI GA và BAT solver.
+- `app/ui/` chứa Studio UI, các đối tượng worker của UI và GUI legacy.
+- `app/experiments/` và `app/reporting/` chứa các runner thí nghiệm, exporter, logging và phần tổng hợp kết quả.
+- `core/`, `ga/`, `utils/`, `experiments/` và `tsp_ga_app/` là các compatibility wrapper để giữ các đường import cũ hoạt động.
+- `outputs/` là vị trí mặc định duy nhất để lưu các artifact được sinh ra từ bản tái cấu trúc này.
 
-## File Guide
+## Hướng Dẫn Theo File
 
-### Root Files
+### Các File Ở Thư Mục Gốc
 
-- `main.py` is the main entrypoint for the refactored project. With no flags it launches the Studio GUI; `--cli` runs the non-GUI solver demo; `--legacy-gui` opens the older compact GUI.
-- `requirements.txt` lists Python dependencies needed by the refactored app, tests, plotting, GUI, SimpleAI solver, and GIF export.
-- `README.md` documents how to run the refactored project, how the folder is organized, and what each file is responsible for.
-- `run_single.py` runs one sample experiment with generated cities, the legacy/core GA engine, result exporting, and reporting metadata.
-- `run_batch.py` runs a sample grid-search batch experiment over mutation rate, crossover type, and selection type.
-- `tsp_ga.py` preserves the old top-level CLI launcher behavior. It runs the CLI solver by default and supports `--gui`.
-- `tsp_ga_gui.py` preserves the old top-level legacy GUI launcher.
-- `gui_runner.py` preserves the old import/launch path for the legacy GUI while delegating implementation to `app.ui.legacy_window`.
+- `main.py` là entrypoint chính của dự án đã tái cấu trúc. Khi không truyền flag, file này mở Studio GUI; `--cli` chạy demo solver không dùng GUI; `--legacy-gui` mở GUI nhỏ cũ hơn.
+- `requirements.txt` liệt kê các thư viện Python cần cho ứng dụng đã tái cấu trúc, test, plotting, GUI, SimpleAI solver và xuất GIF.
+- `README.md` mô tả cách chạy dự án đã tái cấu trúc, cách tổ chức thư mục và trách nhiệm của từng file.
+- `run_single.py` chạy một thí nghiệm mẫu với các thành phố được sinh ra, legacy/core GA engine, quy trình xuất kết quả và metadata dùng cho báo cáo.
+- `run_batch.py` chạy một thí nghiệm batch grid search mẫu theo mutation rate, crossover type và selection type.
+- `tsp_ga.py` giữ hành vi launcher CLI top-level cũ. Mặc định file này chạy CLI solver và có hỗ trợ `--gui`.
+- `tsp_ga_gui.py` giữ launcher GUI legacy top-level cũ.
+- `gui_runner.py` giữ đường import/chạy GUI legacy cũ, đồng thời chuyển phần triển khai sang `app.ui.legacy_window`.
 
-### Canonical App Package
+### Gói Ứng Dụng Chính
 
-- `app/__init__.py` marks `app` as the canonical implementation package for the refactor.
-- `app/paths.py` defines project-local paths, especially `PROJECT_ROOT` and `OUTPUT_ROOT`, so generated files stay inside `new_refract/`.
-- `app/cli.py` contains the non-GUI solver workflow: seed setup, city generation, distance matrix creation, solver selection, printed summary, animation, final route plot, and convergence plot.
+- `app/__init__.py` đánh dấu `app` là gói triển khai canonical của bản tái cấu trúc.
+- `app/paths.py` định nghĩa các đường dẫn cục bộ của dự án, đặc biệt là `PROJECT_ROOT` và `OUTPUT_ROOT`, để file được sinh ra vẫn nằm trong `new_refract/`.
+- `app/cli.py` chứa workflow solver không dùng GUI: thiết lập seed, sinh thành phố, tạo ma trận khoảng cách, chọn solver, in summary, tạo animation, vẽ route cuối và vẽ convergence plot.
 
-### Configuration
+### Cấu Hình
 
-- `app/config/__init__.py` re-exports settings for convenient imports.
-- `app/config/settings.py` contains all default constants: GA population/generation settings, mutation/crossover rates, SimpleAI tuning, BAT comparison default, animation settings, random seed, GIF path, and the legacy `DEFAULT_CONFIG`.
+- `app/config/__init__.py` re-export các thiết lập để import thuận tiện hơn.
+- `app/config/settings.py` chứa toàn bộ hằng số mặc định: thiết lập population/generation của GA, mutation/crossover rate, cấu hình SimpleAI, mặc định so sánh BAT, thiết lập animation, random seed, đường dẫn GIF và `DEFAULT_CONFIG` legacy.
 
-### Algorithms
+### Thuật Toán
 
-- `app/algorithms/__init__.py` exposes the main algorithm helpers and `GAEngine`.
-- `app/algorithms/problem.py` contains shared TSP problem utilities: active distance matrix state, random city generation, Euclidean distance matrix creation, route distance, and inverse-distance fitness.
-- `app/algorithms/operators.py` contains route/population operators used across the project: population creation, distance-based tournament selection, OX1 crossover, inversion mutation, population evolution, fitness-based tournament/roulette selection, PMX/order crossover, swap/reverse/scramble mutation, elitism, and 2-opt local search.
-- `app/algorithms/core_engine.py` contains the legacy configurable GA engine class used by experiment runners and the legacy GUI. It supports selectable selection/crossover/mutation operators, elitism, adaptive mutation, optional local search, metrics, history, runtime, and callback progress.
+- `app/algorithms/__init__.py` cung cấp các helper thuật toán chính và `GAEngine`.
+- `app/algorithms/problem.py` chứa các tiện ích chung cho bài toán TSP: trạng thái ma trận khoảng cách đang dùng, sinh thành phố ngẫu nhiên, tạo ma trận khoảng cách Euclid, tính route distance và fitness nghịch đảo theo khoảng cách.
+- `app/algorithms/operators.py` chứa các toán tử route/population được dùng trong dự án: tạo population, tournament selection dựa trên khoảng cách, OX1 crossover, inversion mutation, tiến hóa population, tournament/roulette selection dựa trên fitness, PMX/order crossover, swap/reverse/scramble mutation, elitism và local search 2-opt.
+- `app/algorithms/core_engine.py` chứa class core GA engine legacy có thể cấu hình, được dùng bởi experiment runners và GUI legacy. Engine này hỗ trợ lựa chọn selection/crossover/mutation operators, elitism, adaptive mutation, local search tùy chọn, metrics, history, runtime và callback progress.
 
-### Solvers
+### Solver
 
-- `app/solvers/__init__.py` exposes the three solver entrypoints.
-- `app/solvers/custom_ga.py` contains the app's custom GA solver used by the Studio UI and CLI. It tracks best route, best distance, convergence history, route history, initial best distance, optional metadata, and live progress payloads.
-- `app/solvers/simpleai_ga.py` contains the SimpleAI-based GA solver. It validates/sanitizes distance matrices, defines the SimpleAI TSP problem, records history through a viewer, supports manual fallback GA behavior, optional elitism/diversity injection, multi-restart execution, and optional 2-opt refinement.
-- `app/solvers/bat.py` contains the BAT-inspired TSP metaheuristic used for Studio UI comparison runs. It implements permutation-safe guided movement, local walks, inversion mutation, loudness/pulse updates, progress payloads, and convergence histories.
+- `app/solvers/__init__.py` cung cấp ba solver entrypoint.
+- `app/solvers/custom_ga.py` chứa custom GA solver của ứng dụng, được Studio UI và CLI sử dụng. Solver này theo dõi best route, best distance, convergence history, route history, initial best distance, metadata tùy chọn và các live progress payload.
+- `app/solvers/simpleai_ga.py` chứa GA solver dựa trên SimpleAI. File này kiểm tra và làm sạch distance matrix, định nghĩa bài toán TSP cho SimpleAI, ghi history thông qua viewer, hỗ trợ hành vi GA manual fallback, elitism/diversity injection tùy chọn, chạy multi-restart và refinement 2-opt tùy chọn.
+- `app/solvers/bat.py` chứa metaheuristic TSP lấy cảm hứng từ BAT, được dùng cho các run so sánh trong Studio UI. Solver này triển khai guided movement an toàn với hoán vị, local walk, inversion mutation, cập nhật loudness/pulse, progress payload và convergence history.
 
-### UI
+### Giao Diện
 
-- `app/ui/__init__.py` exposes the Studio window and launcher.
-- `app/ui/studio_window.py` contains the main PyQt5 Studio UI. It builds the full control panel and plot area, handles datasets, run/batch buttons, convergence views, metrics dialog, route drawing, batch overlays, export after completion, and all visible user-facing Studio behavior.
-- `app/ui/studio_workers.py` contains Qt worker objects for background execution. `SolverWorker` runs the selected solver and optional BAT comparison; `BatchWorker` runs grid search batches without blocking the UI.
-- `app/ui/city_io.py` contains reusable JSON city parsing helpers for point lists, point maps, named datasets, `cities`, `points`, and coordinate dictionaries.
-- `app/ui/legacy_window.py` contains the older compact PyQt5 GUI. It preserves the previous simple controls, progress animation, route/convergence plots, JSON loading, and legacy run/reset behavior.
+- `app/ui/__init__.py` cung cấp Studio window và launcher.
+- `app/ui/studio_window.py` chứa Studio UI chính bằng PyQt5. File này xây dựng control panel và vùng plot đầy đủ, xử lý dataset, nút run/batch, các chế độ xem convergence, hộp thoại metrics, vẽ route, batch overlay, export sau khi chạy xong và toàn bộ hành vi hiển thị của Studio.
+- `app/ui/studio_workers.py` chứa các đối tượng Qt worker để chạy nền. `SolverWorker` chạy solver được chọn và so sánh BAT tùy chọn; `BatchWorker` chạy các batch grid search mà không chặn UI.
+- `app/ui/city_io.py` chứa các helper tái sử dụng để parse thành phố từ JSON cho point list, point map, dataset có tên, `cities`, `points` và các dictionary tọa độ.
+- `app/ui/legacy_window.py` chứa GUI PyQt5 nhỏ cũ hơn. File này giữ lại các control đơn giản trước đây, progress animation, route/convergence plot, load JSON và hành vi run/reset legacy.
 
-### Experiments
+### Thí Nghiệm
 
-- `app/experiments/__init__.py` exposes experiment runner functions.
-- `app/experiments/runner.py` runs a single experiment through `GAEngine`, exports config/metrics/best solution/summary/population snapshots, updates raw result and summary CSV/JSON files, and optionally saves plots/GIFs.
-- `app/experiments/batch_runner.py` runs grid-search combinations over a parameter grid and trial count, creates a parent batch output folder, moves per-trial outputs under it, appends batch raw results, and saves a batch best-distance bar chart when possible.
+- `app/experiments/__init__.py` cung cấp các hàm runner thí nghiệm.
+- `app/experiments/runner.py` chạy một thí nghiệm đơn qua `GAEngine`, xuất config/metrics/best solution/summary/population snapshots, cập nhật raw result và summary CSV/JSON, đồng thời lưu plot/GIF nếu có thể.
+- `app/experiments/batch_runner.py` chạy các tổ hợp grid search theo parameter grid và số trial, tạo thư mục batch cha, chuyển output của từng trial vào bên trong, thêm batch raw results và lưu biểu đồ cột best distance của batch khi có thể.
 
-### Reporting
+### Báo Cáo Và Xuất Kết Quả
 
-- `app/reporting/__init__.py` exposes exporter and logging helpers.
-- `app/reporting/exporter.py` creates experiment folders under `new_refract/outputs` and writes config JSON, metrics CSV, best solution JSON, summary JSON, population snapshots, figures, and batch raw result rows.
-- `app/reporting/logger.py` configures the `GA_TSP` logger for console output and optional per-experiment log files.
-- `app/reporting/results.py` owns result schemas and summary reporting. It converts NumPy values to JSON-safe data, reads/writes CSV/JSON, records dataset metadata, appends raw results, computes nearest-neighbor baselines, builds optimality fields, and updates summary statistics.
+- `app/reporting/__init__.py` cung cấp các helper exporter và logging.
+- `app/reporting/exporter.py` tạo các thư mục thí nghiệm dưới `new_refract/outputs` và ghi config JSON, metrics CSV, best solution JSON, summary JSON, population snapshots, figures và các dòng batch raw result.
+- `app/reporting/logger.py` cấu hình logger `GA_TSP` cho console output và file log theo từng thí nghiệm nếu cần.
+- `app/reporting/results.py` quản lý result schema và summary reporting. File này chuyển giá trị NumPy sang dữ liệu an toàn cho JSON, đọc/ghi CSV/JSON, ghi dataset metadata, thêm raw results, tính nearest-neighbor baseline, xây dựng các trường optimality và cập nhật summary statistics.
 
-### Visualization
+### Trực Quan Hóa
 
-- `app/visualization/__init__.py` exposes plotting helpers.
-- `app/visualization/plots.py` creates Matplotlib route plots, convergence plots, and route evolution animations. It can also save the evolution GIF to the configured project-local path.
+- `app/visualization/__init__.py` cung cấp các helper plotting.
+- `app/visualization/plots.py` tạo Matplotlib route plot, convergence plot và animation tiến hóa route. File này cũng có thể lưu evolution GIF vào đường dẫn cục bộ đã cấu hình trong dự án.
 
-### Tools
+### Công Cụ
 
-- `app/tools/__init__.py` marks the tools package.
-- `app/tools/gen_data.py` converts TSPLIB-style CSV rows into JSON city datasets. It includes CSV field-size handling, filename slugging, coordinate parsing, and per-instance JSON export.
-- `app/tools/reproduce_report_figures.py` reads generated reporting CSV files and saves report figures for best distance by run, summary mean with confidence intervals, and dataset city counts.
+- `app/tools/__init__.py` đánh dấu package tools.
+- `app/tools/gen_data.py` chuyển các dòng CSV theo kiểu TSPLIB thành dataset thành phố dạng JSON. File này xử lý giới hạn kích thước field CSV, tạo slug filename, parse tọa độ và xuất JSON theo từng instance.
+- `app/tools/reproduce_report_figures.py` đọc các file CSV báo cáo đã sinh ra và lưu các hình dùng cho báo cáo: best distance theo run, summary mean với confidence interval và số lượng thành phố theo dataset.
 
-### Compatibility Wrappers
+### Compatibility Wrapper
 
-These files exist so old imports still work inside `new_refract/`. They should stay thin and delegate to `app.*`.
+Các file này tồn tại để các đường import cũ vẫn hoạt động khi chạy bên trong `new_refract/`. Chúng nên giữ mỏng và chuyển tiếp sang `app.*`.
 
-- `core/__init__.py`, `core/config.py`, and `core/ga_engine.py` preserve old `core.*` imports for `DEFAULT_CONFIG` and `GAEngine`.
-- `ga/__init__.py`, `ga/selection.py`, `ga/crossover.py`, `ga/mutation.py`, `ga/elitism.py`, and `ga/local_search.py` preserve old GA operator imports.
-- `utils/__init__.py`, `utils/exporter.py`, `utils/logger.py`, and `utils/results_reporting.py` preserve old reporting/logging imports.
-- `experiments/__init__.py`, `experiments/runner.py`, and `experiments/batch_runner.py` preserve old experiment runner imports.
-- `tsp_ga_app/__init__.py`, `tsp_ga_app/config.py`, `tsp_ga_app/problem.py`, `tsp_ga_app/operators.py`, `tsp_ga_app/solver.py`, `tsp_ga_app/simpleai_solver.py`, `tsp_ga_app/bat_solver.py`, `tsp_ga_app/visualization.py`, `tsp_ga_app/visualize.py`, `tsp_ga_app/gui.py`, and `tsp_ga_app/main.py` preserve the old app package API while redirecting to the refactored implementation.
-- `data_gen/__init__.py` and `data_gen/gen_data.py` preserve the old data-conversion import and script path.
-- `scripts/__init__.py` and `scripts/reproduce_report_figures.py` preserve the old report-figure script path.
+- `core/__init__.py`, `core/config.py` và `core/ga_engine.py` giữ các import `core.*` cũ cho `DEFAULT_CONFIG` và `GAEngine`.
+- `ga/__init__.py`, `ga/selection.py`, `ga/crossover.py`, `ga/mutation.py`, `ga/elitism.py` và `ga/local_search.py` giữ các import toán tử GA cũ.
+- `utils/__init__.py`, `utils/exporter.py`, `utils/logger.py` và `utils/results_reporting.py` giữ các import reporting/logging cũ.
+- `experiments/__init__.py`, `experiments/runner.py` và `experiments/batch_runner.py` giữ các import experiment runner cũ.
+- `tsp_ga_app/__init__.py`, `tsp_ga_app/config.py`, `tsp_ga_app/problem.py`, `tsp_ga_app/operators.py`, `tsp_ga_app/solver.py`, `tsp_ga_app/simpleai_solver.py`, `tsp_ga_app/bat_solver.py`, `tsp_ga_app/visualization.py`, `tsp_ga_app/visualize.py`, `tsp_ga_app/gui.py` và `tsp_ga_app/main.py` giữ API của package ứng dụng cũ trong khi chuyển tiếp sang phần triển khai đã tái cấu trúc.
+- `data_gen/__init__.py` và `data_gen/gen_data.py` giữ đường import và đường script chuyển đổi dữ liệu cũ.
+- `scripts/__init__.py` và `scripts/reproduce_report_figures.py` giữ đường script tạo figure báo cáo cũ.
 
-### Tests
+### Kiểm Thử
 
-- `tests/conftest.py` ensures `new_refract/` is on `sys.path` during tests.
-- `tests/test_selection.py` checks both legacy fitness-based selection and app distance-based tournament selection return valid routes.
-- `tests/test_crossover.py` checks PMX, order crossover, and OX1 all produce valid permutations.
-- `tests/test_mutation.py` checks swap, reverse, scramble, and inversion mutation preserve route validity.
-- `tests/test_elitism.py` checks core elitism keeps the best fitness route and app evolution preserves the lowest-distance elite.
-- `tests/test_distance.py` checks Euclidean distance matrix creation and cyclic route distance.
-- `tests/test_route_validity.py` checks generated populations contain every city exactly once.
-- `tests/test_reproducibility.py` checks the same seed gives the same best route and distance through `GAEngine`.
-- `tests/test_result_schema.py` checks raw result exports include required fields.
-- `tests/test_dataset_metadata.py` checks dataset metadata exports include required fields.
-- `tests/test_optimality_gap.py` checks known optimum gap calculation and unknown optimum labeling.
-- `tests/test_output_isolation.py` checks the default exporter output root is inside `new_refract/`.
+- `tests/conftest.py` bảo đảm `new_refract/` nằm trong `sys.path` khi chạy test.
+- `tests/test_selection.py` kiểm tra cả selection legacy dựa trên fitness và tournament selection của app dựa trên khoảng cách đều trả về route hợp lệ.
+- `tests/test_crossover.py` kiểm tra PMX, order crossover và OX1 đều tạo ra hoán vị hợp lệ.
+- `tests/test_mutation.py` kiểm tra swap, reverse, scramble và inversion mutation đều giữ route hợp lệ.
+- `tests/test_elitism.py` kiểm tra elitism của core giữ route có fitness tốt nhất và quá trình evolution của app giữ elite có khoảng cách thấp nhất.
+- `tests/test_distance.py` kiểm tra quá trình tạo ma trận khoảng cách Euclid và cyclic route distance.
+- `tests/test_route_validity.py` kiểm tra population được sinh ra chứa mỗi thành phố đúng một lần.
+- `tests/test_reproducibility.py` kiểm tra cùng seed tạo ra cùng best route và best distance qua `GAEngine`.
+- `tests/test_result_schema.py` kiểm tra raw result export chứa các trường bắt buộc.
+- `tests/test_dataset_metadata.py` kiểm tra dataset metadata export chứa các trường bắt buộc.
+- `tests/test_optimality_gap.py` kiểm tra phép tính gap so với known optimum và nhãn khi không có optimum.
+- `tests/test_output_isolation.py` kiểm tra output root mặc định của exporter nằm bên trong `new_refract/`.
 
-### Outputs
+### Output
 
-- `outputs/.gitkeep` keeps the output folder present in version control.
-- `outputs/` is where the CLI, GUI, experiment runners, reports, summaries, logs, figures, population snapshots, and GIFs are written by default.
+- `outputs/.gitkeep` giữ thư mục output tồn tại trong version control.
+- `outputs/` là nơi CLI, GUI, experiment runners, báo cáo, summary, logs, figures, population snapshots và GIF được ghi mặc định.
 
-## Compatibility
+## Tương Thích
 
-Old imports continue to work when run from inside `new_refract/`, for example:
+Các import cũ vẫn hoạt động khi chạy bên trong `new_refract/`, ví dụ:
 
 ```python
 from ga.selection import tournament_selection
@@ -143,4 +143,14 @@ from tsp_ga_app.problem import compute_distance_matrix
 from utils.results_reporting import append_raw_result
 ```
 
-The wrappers re-export functions/classes from `app/`; new code should prefer `app.*` imports.
+Các wrapper re-export hàm/class từ `app/`; code mới nên ưu tiên import từ `app.*`.
+
+
+# BẢNG PHÂN CÔNG NHIỆM VỤ
+
+| Thành viên | Nhiệm vụ |
+|---|---|
+| Tất Chí Thành | Phụ trách đột biến và cơ chế elitism trong GA, đồng thời kiểm tra tính hợp lệ của lời giải sau mỗi thế hệ và hỗ trợ phần đo lường hiệu suất liên quan đến hội tụ. |
+| Nguyễn Minh Thức | Phụ trách giao diện người dùng và luồng tương tác của chương trình, bao gồm nhập tham số, chọn dữ liệu, chạy thuật toán và hiển thị kết quả. |
+| Trần Xuân Phát | Phụ trách xử lý dữ liệu đầu vào và hàm khoảng cách, bao gồm đọc JSON, sinh random cities, xây dựng ma trận khoảng cách và tính fitness dựa trên route distance. |
+| Vũ Đặng Khánh My | Phụ trách selection, crossover và khởi tạo quần thể trong GA, đảm bảo các toán tử di truyền tạo ra cá thể hợp lệ theo biểu diễn hoán vị. |
