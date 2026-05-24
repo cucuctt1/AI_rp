@@ -1,3 +1,12 @@
+# BẢNG PHÂN CÔNG NHIỆM VỤ
+
+| Thành viên | Nhiệm vụ |
+|---|---|
+| Tất Chí Thành | Phụ trách đột biến và cơ chế elitism trong GA, đồng thời kiểm tra tính hợp lệ của lời giải sau mỗi thế hệ và hỗ trợ phần đo lường hiệu suất liên quan đến hội tụ. |
+| Nguyễn Minh Thức | Phụ trách giao diện người dùng và luồng tương tác của chương trình, bao gồm nhập tham số, chọn dữ liệu, chạy thuật toán và hiển thị kết quả. |
+| Trần Xuân Phát | Phụ trách xử lý dữ liệu đầu vào và hàm khoảng cách, bao gồm đọc JSON, sinh random cities, xây dựng ma trận khoảng cách và tính fitness dựa trên route distance. |
+| Vũ Đặng Khánh My | Phụ trách selection, crossover và khởi tạo quần thể trong GA, đảm bảo các toán tử di truyền tạo ra cá thể hợp lệ theo biểu diễn hoán vị. |
+
 # Bộ Giải TSP Bằng Giải Thuật Di Truyền Đã Được Tái Cấu Trúc
 
 Thư mục này là bản tái cấu trúc độc lập của dự án gốc. Các file gốc nằm ngoài `new_refract/` không cần thiết khi chạy chương trình.
@@ -146,11 +155,4 @@ from utils.results_reporting import append_raw_result
 Các wrapper re-export hàm/class từ `app/`; code mới nên ưu tiên import từ `app.*`.
 
 
-# BẢNG PHÂN CÔNG NHIỆM VỤ
 
-| Thành viên | Nhiệm vụ |
-|---|---|
-| Tất Chí Thành | Phụ trách đột biến và cơ chế elitism trong GA, đồng thời kiểm tra tính hợp lệ của lời giải sau mỗi thế hệ và hỗ trợ phần đo lường hiệu suất liên quan đến hội tụ. |
-| Nguyễn Minh Thức | Phụ trách giao diện người dùng và luồng tương tác của chương trình, bao gồm nhập tham số, chọn dữ liệu, chạy thuật toán và hiển thị kết quả. |
-| Trần Xuân Phát | Phụ trách xử lý dữ liệu đầu vào và hàm khoảng cách, bao gồm đọc JSON, sinh random cities, xây dựng ma trận khoảng cách và tính fitness dựa trên route distance. |
-| Vũ Đặng Khánh My | Phụ trách selection, crossover và khởi tạo quần thể trong GA, đảm bảo các toán tử di truyền tạo ra cá thể hợp lệ theo biểu diễn hoán vị. |
