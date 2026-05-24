@@ -1,0 +1,47 @@
+def mutation_inversion(route: Sequence[int], mutation_rate: float = MUTATION_RATE) -> List[int]:
+    """Inversion mutation: reverse one random subsegment."""
+    mutated = list(route)
+    if len(mutated) >= 2 and random.random() < mutation_rate:
+        left, right = sorted(random.sample(range(len(mutated)), 2))
+        mutated[left : right + 1] = reversed(mutated[left : right + 1])
+    return mutated
+
+
+def evolve_population(
+    population: Sequence[Sequence[int]],
+    dist_matrix: np.ndarray,
+    distances: Optional[Sequence[float]] = None,
+    elite_size: int = ELITE_SIZE,
+    tournament_size: int = TOURNAMENT_SIZE,
+    crossover_rate: float = CROSSOVER_RATE,
+    mutation_rate: float = MUTATION_RATE,
+) -> List[List[int]]:
+    """Create the next generation with elitism, selection, crossover, and mutation."""
+    pop_size = len(population)
+    if pop_size == 0:
+        raise ValueError("Population cannot be empty.")
+
+    if distances is None:
+        distances = [route_distance(route, dist_matrix) for route in population]
+
+    city_count = len(population[0])
+    #Elitism ở đây
+    elite_count = max(0, min(elite_size, pop_size))
+    ranked_indices = sorted(range(pop_size), key=lambda idx: distances[idx])
+
+    next_population: List[List[int]] = [
+        list(population[idx]) for idx in ranked_indices[:elite_count]
+    ]
+
+    while len(next_population) < pop_size:
+        parent_a = tournament_selection(population, distances, tournament_size)
+        parent_b = tournament_selection(population, distances, tournament_size)
+        child = crossover_OX1(parent_a, parent_b, crossover_rate)
+        child = mutation_inversion(child, mutation_rate)
+
+        if len(child) != city_count or len(set(child)) != city_count:
+            raise ValueError("Evolution produced an invalid route permutation.")
+
+        next_population.append(child)
+
+    return next_population
