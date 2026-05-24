@@ -9,12 +9,10 @@
 
 # Bộ Giải TSP Bằng Giải Thuật Di Truyền Đã Được Tái Cấu Trúc
 
-Thư mục này là bản tái cấu trúc độc lập của dự án gốc. Các file gốc nằm ngoài `new_refract/` không cần thiết khi chạy chương trình.
-
 ## Chạy Chương Trình
 
 ```bash
-python new_refract/main.py
+python main.py
 ```
 
 Lệnh này khởi chạy giao diện Studio PyQt5 hiện tại.
@@ -22,9 +20,8 @@ Lệnh này khởi chạy giao diện Studio PyQt5 hiện tại.
 Các entrypoint khác:
 
 ```bash
-python new_refract/main.py --cli
-python new_refract/main.py --legacy-gui
-cd new_refract
+python main.py --cli
+python main.py --legacy-gui
 python main.py
 python -m pytest -q
 ```
@@ -55,7 +52,7 @@ python -m pytest -q
 ### Gói Ứng Dụng Chính
 
 - `app/__init__.py` đánh dấu `app` là gói triển khai canonical của bản tái cấu trúc.
-- `app/paths.py` định nghĩa các đường dẫn cục bộ của dự án, đặc biệt là `PROJECT_ROOT` và `OUTPUT_ROOT`, để file được sinh ra vẫn nằm trong `new_refract/`.
+- `app/paths.py` định nghĩa các đường dẫn cục bộ của dự án, đặc biệt là `PROJECT_ROOT` và `OUTPUT_ROOT`
 - `app/cli.py` chứa workflow solver không dùng GUI: thiết lập seed, sinh thành phố, tạo ma trận khoảng cách, chọn solver, in summary, tạo animation, vẽ route cuối và vẽ convergence plot.
 
 ### Cấu Hình
@@ -94,7 +91,7 @@ python -m pytest -q
 ### Báo Cáo Và Xuất Kết Quả
 
 - `app/reporting/__init__.py` cung cấp các helper exporter và logging.
-- `app/reporting/exporter.py` tạo các thư mục thí nghiệm dưới `new_refract/outputs` và ghi config JSON, metrics CSV, best solution JSON, summary JSON, population snapshots, figures và các dòng batch raw result.
+- `app/reporting/exporter.py` tạo các thư mục thí nghiệm dưới `/outputs` và ghi config JSON, metrics CSV, best solution JSON, summary JSON, population snapshots, figures và các dòng batch raw result.
 - `app/reporting/logger.py` cấu hình logger `GA_TSP` cho console output và file log theo từng thí nghiệm nếu cần.
 - `app/reporting/results.py` quản lý result schema và summary reporting. File này chuyển giá trị NumPy sang dữ liệu an toàn cho JSON, đọc/ghi CSV/JSON, ghi dataset metadata, thêm raw results, tính nearest-neighbor baseline, xây dựng các trường optimality và cập nhật summary statistics.
 
@@ -134,16 +131,14 @@ Các file này tồn tại để các đường import cũ vẫn hoạt động 
 - `tests/test_result_schema.py` kiểm tra raw result export chứa các trường bắt buộc.
 - `tests/test_dataset_metadata.py` kiểm tra dataset metadata export chứa các trường bắt buộc.
 - `tests/test_optimality_gap.py` kiểm tra phép tính gap so với known optimum và nhãn khi không có optimum.
-- `tests/test_output_isolation.py` kiểm tra output root mặc định của exporter nằm bên trong `new_refract/`.
+- `tests/test_output_isolation.py` kiểm tra output root mặc định của exporter.
 
-### Output
+### Output.
 
 - `outputs/.gitkeep` giữ thư mục output tồn tại trong version control.
 - `outputs/` là nơi CLI, GUI, experiment runners, báo cáo, summary, logs, figures, population snapshots và GIF được ghi mặc định.
 
 ## Tương Thích
-
-Các import cũ vẫn hoạt động khi chạy bên trong `new_refract/`, ví dụ:
 
 ```python
 from ga.selection import tournament_selection
